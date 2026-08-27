@@ -121,6 +121,7 @@ CMakeLists.txt.user*
 *.creator.user*
 
 /build*/
+Haruna-SharePlay-x86_64.AppImage
 cmake-build-debug*
 .idea
 /compile_commands.json
@@ -128,5 +129,5 @@ cmake-build-debug*
 .cache
 .clang-format
 .vscode
-
-
+.appimage-tools
+/AppDir/
