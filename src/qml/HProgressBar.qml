@@ -18,11 +18,13 @@ import org.kde.kirigami as Kirigami
 import org.kde.haruna
 import org.kde.haruna.utilities
 import org.kde.haruna.settings
+import org.kde.haruna.shareplay
 
 RowLayout {
     id: root
 
     required property MpvVideo m_mpv
+    required property SharePlayManager m_sharePlay
 
     property alias loopIndicator: loopIndicator
     property alias chaptersPopupIsOpen: chaptersPopup.visible
@@ -41,6 +43,8 @@ RowLayout {
 
     Slider {
         id: slider
+
+        enabled: root.m_sharePlay.canControl
 
         property bool seekStarted: false
         property bool prePressPause: root.m_mpv.pause

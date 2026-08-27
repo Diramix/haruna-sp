@@ -108,6 +108,22 @@ kconfig_target_kcfg_file(settings
 )
 
 # -----------------------------------
+# SharePlaySettings
+# -----------------------------------
+kconfig_target_kcfg_file(settings
+    FILE shareplaysettings.kcfg
+    CLASS_NAME SharePlaySettings
+
+    MUTATORS
+    SINGLETON
+    GENERATE_MOC
+    DEFAULT_VALUE_GETTERS
+    GENERATE_PROPERTIES
+    PARENT_IN_CONSTRUCTOR
+    QML_REGISTRATION
+)
+
+# -----------------------------------
 # SubtitlesSettings
 # -----------------------------------
 kconfig_target_kcfg_file(settings

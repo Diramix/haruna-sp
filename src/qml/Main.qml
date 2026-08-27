@@ -20,6 +20,7 @@ import org.kde.haruna.playlist
 import org.kde.haruna.transcript
 import org.kde.haruna.utilities
 import org.kde.haruna.settings
+import org.kde.haruna.shareplay
 import org.kde.haruna.youtube
 
 ApplicationWindow {
@@ -95,6 +96,8 @@ ApplicationWindow {
 
         m_mpv: mpv
         m_settingsLoader: settingsLoader
+        m_sharePlay: sharePlay
+        m_sharePlayConfigWindow: sharePlayConfigWindow
     }
 
     Connections {
@@ -358,6 +361,7 @@ ApplicationWindow {
         anchors.bottom: window.contentItem.bottom
 
         m_mpv: mpv
+        m_sharePlay: sharePlay
         playlistsManager: playlist.manager
         m_menuBarLoader: menuBarLoader
         m_header: header
@@ -368,6 +372,7 @@ ApplicationWindow {
         id: actions
 
         m_mpv: mpv
+        m_sharePlay: sharePlay
         playlistsManager: playlist.manager
         m_mpvContextMenuLoader: mpvContextMenuLoader
         m_osd: osd
@@ -414,6 +419,110 @@ ApplicationWindow {
         id: settingsLoader
 
         m_mpv: mpv
+    }
+
+    SharePlayManager {
+        id: sharePlay
+
+        syncThreshold: SharePlaySettings.syncThreshold
+
+        onApplyPause: function(paused) {
+            mpv.pause = paused
+        }
+
+        onApplySeek: function(position) {
+            mpv.commandAsync(["seek", position.toFixed(3), "absolute+exact"])
+        }
+
+        onApplySpeed: function(speed) {
+            mpv.setPlaybackSpeed(speed)
+        }
+
+        onMediaAvailable: function(url, title) {
+            if (mpv.currentUrl.toString() === url.toString()) {
+                return
+            }
+            window.openFile(url, RecentFilesModel.OpenedFrom.Other)
+        }
+
+        onNotice: function(text) {
+            osd.message(text)
+        }
+
+        onPeerRequestedPause: function(name, paused) {
+            osd.message(paused
+                        ? KI18n.i18nc("@info osd message, %1 is a viewer name", "%1 requested a pause", name)
+                        : KI18n.i18nc("@info osd message, %1 is a viewer name", "%1 requested to resume", name))
+        }
+
+        onErrorOccurred: function(message) {
+            osd.message(message)
+        }
+    }
+
+    SharePlayConfigWindow {
+        id: sharePlayConfigWindow
+
+        m_sharePlay: sharePlay
+    }
+
+    // mpv only notifies the position a few times per second and the value can already be
+    // stale when it arrives, so the sync loop reads the live time-pos instead
+    Timer {
+        id: sharePlayClock
+
+        function livePosition() : real {
+            const value = mpv.getProperty("time-pos")
+            return value === undefined || value === null ? mpv.position : value
+        }
+
+        interval: 200
+        repeat: true
+        running: sharePlay.isActive
+        onTriggered: {
+            if (sharePlay.isHost) {
+                sharePlay.publishState(sharePlayClock.livePosition(), mpv.pause)
+            } else {
+                sharePlay.reportPosition(sharePlayClock.livePosition())
+            }
+        }
+    }
+
+    Connections {
+        target: mpv
+        enabled: sharePlay.isActive
+
+        function onPauseChanged() {
+            if (sharePlay.isHost) {
+                sharePlay.publishState(sharePlayClock.livePosition(), mpv.pause)
+            }
+        }
+        function onPositionChanged() {
+            // the timer keeps the clients in sync, this only makes a seek travel immediately
+            if (sharePlay.isHost) {
+                sharePlay.publishState(mpv.position, mpv.pause)
+            }
+        }
+        function onCurrentUrlChanged() {
+            sharePlay.setHostMedia(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
+        }
+        function onMediaTitleChanged() {
+            sharePlay.setHostMedia(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
+        }
+        function onDurationChanged() {
+            sharePlay.setHostMedia(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
+        }
+    }
+
+    Connections {
+        target: sharePlay
+
+        function onModeChanged() {
+            if (sharePlay.isHost) {
+                sharePlay.setHostMedia(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
+                sharePlay.publishState(sharePlayClock.livePosition(), mpv.pause)
+            }
+        }
     }
 
     Connections {

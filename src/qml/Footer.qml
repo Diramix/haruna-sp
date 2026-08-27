@@ -16,11 +16,13 @@ import org.kde.kirigami as Kirigami
 import org.kde.haruna
 import org.kde.haruna.playlist
 import org.kde.haruna.settings
+import org.kde.haruna.shareplay
 
 Item {
     id: root
 
     required property MpvVideo m_mpv
+    required property SharePlayManager m_sharePlay
     required property PlaylistsManager playlistsManager
     required property MenuBarLoader m_menuBarLoader
     required property Header m_header
@@ -219,6 +221,7 @@ Item {
                     id: progressBar
 
                     m_mpv: root.m_mpv
+                    m_sharePlay: root.m_sharePlay
 
                     Layout.fillWidth: true
                     Layout.preferredHeight: 20

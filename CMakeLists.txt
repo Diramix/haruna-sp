@@ -76,6 +76,13 @@ set_package_properties(Qt6QuickControls2 PROPERTIES TYPE REQUIRED)
 find_package(Qt6Sql ${QT_MIN_VERSION})
 set_package_properties(Qt6Sql PROPERTIES TYPE REQUIRED)
 
+find_package(Qt6Network ${QT_MIN_VERSION})
+set_package_properties(Qt6Network PROPERTIES TYPE REQUIRED)
+
+find_package(Qt6WebSockets ${QT_MIN_VERSION})
+set_package_properties(Qt6WebSockets PROPERTIES TYPE REQUIRED
+    PURPOSE "Required for the SharePlay synchronized playback feature")
+
 find_package(Qt6ShaderTools ${QT_MIN_VERSION})
 set_package_properties(Qt6ShaderTools PROPERTIES TYPE REQUIRED)
 

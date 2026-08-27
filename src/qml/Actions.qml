@@ -15,10 +15,12 @@ import org.kde.haruna
 import org.kde.haruna.playlist
 import org.kde.haruna.utilities
 import org.kde.haruna.settings
+import org.kde.haruna.shareplay
 
 Item {
     id: root
 
+    required property SharePlayManager m_sharePlay
     required property MpvItem m_mpv
     required property PlaylistsManager playlistsManager
     required property MpvContextMenu m_mpvContextMenuLoader
@@ -27,6 +29,14 @@ Item {
     required property Footer m_footer
     required property SelectActionPopup m_triggerActionPopup
     required property InputPopup m_openUrlPopup
+
+    function playbackIsRemote() : bool {
+        if (root.m_sharePlay.canControl) {
+            return false
+        }
+        root.m_osd.message(KI18n.i18nc("@info osd message", "Playback is controlled by the host"))
+        return true
+    }
 
     signal openFileDialog()
     signal openSubtitleDialog()
@@ -105,10 +115,16 @@ Item {
         }
 
         function onFrameStepForwardAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["frame-step"])
         }
 
         function onFrameStepBackwardAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["frame-back-step"])
         }
 
@@ -174,19 +190,32 @@ Item {
         }
 
         function onPlayPauseAction() {
+            if (!root.m_sharePlay.canControl) {
+                root.m_sharePlay.requestPause(!root.m_mpv.pause)
+                return
+            }
             root.m_mpv.pause = !root.m_mpv.pause
         }
 
         function onPlayNextAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.playlistsManager.playNext()
             Models.recentFilesModel.addRecentFile(root.playlistsManager.activeItemPath(), RecentFilesModel.OpenedFrom.Playlist)
         }
 
         function onStopAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.stop()
         }
 
         function onPlayPreviousAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.playlistsManager.playPrevious()
             Models.recentFilesModel.addRecentFile(root.playlistsManager.activeItemPath(), RecentFilesModel.OpenedFrom.Playlist)
         }
@@ -196,34 +225,58 @@ Item {
         }
 
         function onRestartPlaybackAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["seek", 0, "absolute"])
         }
 
         function onSeekForwardSmallAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["seek", PlaybackSettings.seekSmallStep, "exact"])
         }
 
         function onSeekBackwardSmallAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["seek", -PlaybackSettings.seekSmallStep, "exact"])
         }
 
         function onSeekForwardMediumAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["seek", PlaybackSettings.seekMediumStep, "exact"])
         }
 
         function onSeekBackwardMediumAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["seek", -PlaybackSettings.seekMediumStep, "exact"])
         }
 
         function onSeekForwardBigAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["seek", PlaybackSettings.seekBigStep, "exact"])
         }
 
         function onSeekBackwardBigAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["seek", -PlaybackSettings.seekBigStep, "exact"])
         }
 
         function onSeekNextChapterAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             const chapters = root.m_mpv.getProperty(MpvProperties.ChapterList)
             const currentChapter = root.m_mpv.getProperty(MpvProperties.Chapter)
             const nextChapter = currentChapter + 1
@@ -235,10 +288,16 @@ Item {
         }
 
         function onSeekPreviousChapterAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             root.m_mpv.command(["add", "chapter", "-1"])
         }
 
         function onSeekNextSubtitleAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             if (root.m_mpv.getProperty(MpvProperties.SubtitleId) !== false) {
                 root.m_mpv.command(["sub-seek", "1"])
             } else {
@@ -247,6 +306,9 @@ Item {
         }
 
         function onSeekPreviousSubtitleAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             if (root.m_mpv.getProperty(MpvProperties.SubtitleId) !== false) {
                 root.m_mpv.command(["sub-seek", "-1"])
             } else {
@@ -255,6 +317,9 @@ Item {
         }
 
         function onSeekToWatchLaterPositionAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             if (root.m_mpv.watchLaterPosition === 0) {
                 return
             }
@@ -262,6 +327,9 @@ Item {
         }
 
         function onSetLoopAction() {
+            if (root.playbackIsRemote()) {
+                return
+            }
             var a = root.m_mpv.getProperty(MpvProperties.ABLoopA)
             var b = root.m_mpv.getProperty(MpvProperties.ABLoopB)
 
