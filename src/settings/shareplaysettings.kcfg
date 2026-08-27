@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ SPDX-FileCopyrightText: 2026 Haruna SharePlay
+
+ SPDX-License-Identifier: GPL-3.0-or-later
+ -->
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd" >
+    <kcfgfile name="haruna/haruna.conf" />
+    <group name="SharePlay">
+        <entry name="Nickname" type="String"><default></default></entry>
+        <entry name="Password" type="String"><default></default></entry>
+        <entry name="StreamMedia" type="Bool"><default>true</default></entry>
+        <entry name="LastServerAddress" type="String"><default></default></entry>
+        <entry name="LastServerPassword" type="String"><default></default></entry>
+        <entry name="SyncThreshold" type="Double"><default>0.8</default></entry>
+    </group>
+</kcfg>

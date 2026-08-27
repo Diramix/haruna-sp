@@ -15,12 +15,15 @@ import org.kde.kirigami as Kirigami
 import org.kde.haruna
 import org.kde.haruna.utilities
 import org.kde.haruna.settings
+import org.kde.haruna.shareplay
 
 Loader {
     id: root
 
     required property MpvVideo m_mpv
     required property SettingsWindow m_settingsLoader
+    required property SharePlayManager m_sharePlay
+    required property SharePlayConfigWindow m_sharePlayConfigWindow
 
     property bool isShowAnimationRunning: false
     property bool showGlobalMenu: SystemUtils.platformName() !== "windows"
@@ -48,6 +51,10 @@ Loader {
             AudioMenu {
                 m_mpv: root.m_mpv
             }
+            SharePlayMenu {
+                m_sharePlay: root.m_sharePlay
+                m_configWindow: root.m_sharePlayConfigWindow
+            }
             SettingsMenu {
                 m_settingsLoader: root.m_settingsLoader
             }
@@ -68,6 +75,10 @@ Loader {
             }
             GlobalAudioMenu {
                 m_mpv: root.m_mpv
+            }
+            GlobalSharePlayMenu {
+                m_sharePlay: root.m_sharePlay
+                m_configWindow: root.m_sharePlayConfigWindow
             }
             GlobalSettingsMenu {
                 m_settingsLoader: root.m_settingsLoader

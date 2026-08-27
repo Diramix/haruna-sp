@@ -89,6 +89,7 @@ endif()
 
 add_subdirectory(framedecoder)
 add_subdirectory(playlist)
+add_subdirectory(shareplay)
 add_subdirectory(transcript)
 add_subdirectory(utilities)
 add_subdirectory(settings)
@@ -133,6 +134,7 @@ qt_add_qml_module(haruna
         qml/Menus/HelpMenu.qml
         qml/Menus/PlaybackMenu.qml
         qml/Menus/SettingsMenu.qml
+        qml/Menus/SharePlayMenu.qml
         qml/Menus/SubtitlesMenu.qml
         qml/Menus/VideoMenu.qml
         qml/Menus/ViewMenu.qml
@@ -141,6 +143,7 @@ qt_add_qml_module(haruna
         qml/Menus/Global/GlobalHelpMenu.qml
         qml/Menus/Global/GlobalPlaybackMenu.qml
         qml/Menus/Global/GlobalSettingsMenu.qml
+        qml/Menus/Global/GlobalSharePlayMenu.qml
         qml/Menus/Global/GlobalSubtitlesMenu.qml
         qml/Menus/Global/GlobalVideoMenu.qml
         qml/Menus/Global/GlobalViewMenu.qml
@@ -205,6 +208,7 @@ target_link_libraries(haruna PRIVATE
 
     framedecoderplugin
     playlistplugin
+    shareplayplugin
     transcriptplugin
     utilitiesplugin
     settingsplugin
