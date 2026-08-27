@@ -22,8 +22,13 @@ namespace
 constexpr int SeekSettleMs = 1500;
 /** while the host is paused the position has to match exactly, there is nothing to smooth */
 constexpr double PausedThreshold = 0.05;
+/** below this the drift is left alone, chasing it would only add jitter */
+constexpr double DeadBand = 0.03;
 /** a hard seek always overshoots a little, this covers the time it takes to land */
 constexpr double SeekLead = 0.12;
+/** drift in seconds is turned into a speed change with this gain, capped right below */
+constexpr double SpeedGain = 0.4;
+constexpr double MaxSpeedAdjust = 0.08;
 }
 
 SharePlayManager::SharePlayManager(QObject *parent)
@@ -32,8 +37,6 @@ SharePlayManager::SharePlayManager(QObject *parent)
     , m_mediaServer(new SharePlayMediaServer(this))
     , m_client(new SharePlayClient(this))
 {
-    m_server->setMediaServer(m_mediaServer);
-
     connect(m_server, &SharePlayServer::peersChanged, this, [this]() {
         m_peers = m_server->peerNames();
         Q_EMIT peersChanged();
@@ -87,10 +90,7 @@ SharePlayManager::SharePlayManager(QObject *parent)
     connect(m_client, &SharePlayClient::mediaReceived, this, [this](const QUrl &url, const QString &title, double) {
         setMediaTitle(title);
         if (url.isValid() && !url.isEmpty()) {
-            setMediaUrl(url);
             Q_EMIT mediaAvailable(url, title);
-        } else {
-            setMediaUrl(QUrl());
         }
     });
 
@@ -146,23 +146,14 @@ QString SharePlayManager::mediaTitle() const
     return m_mediaTitle;
 }
 
-QUrl SharePlayManager::mediaUrl() const
-{
-    return m_mediaUrl;
-}
-
-void SharePlayManager::setMediaUrl(const QUrl &url)
-{
-    if (m_mediaUrl == url) {
-        return;
-    }
-    m_mediaUrl = url;
-    Q_EMIT mediaUrlChanged();
-}
-
 int SharePlayManager::controlPort() const
 {
     return SharePlayProtocol::ControlPort;
+}
+
+int SharePlayManager::mediaPort() const
+{
+    return SharePlayProtocol::MediaPort;
 }
 
 double SharePlayManager::drift() const
@@ -200,9 +191,14 @@ void SharePlayManager::evaluateSync()
         return;
     }
 
-    // the playback speed stays pinned to 1.0 during a SharePlay session, so a small
-    // drift inside the tolerance is simply left to the next hard seek to correct
-    setSpeedFactor(1.0);
+    if (hostPaused || qAbs(drift) < DeadBand) {
+        setSpeedFactor(1.0);
+        return;
+    }
+
+    // inside the tolerance the drift is absorbed by playing slightly faster or slower,
+    // which is far less jarring than a jump and keeps the error near zero
+    setSpeedFactor(1.0 + qBound(-MaxSpeedAdjust, drift * SpeedGain, MaxSpeedAdjust));
 }
 
 void SharePlayManager::setDrift(double value)
@@ -248,6 +244,11 @@ bool SharePlayManager::startHost(const QString &password, bool streamMedia)
         setStatusText(message);
         Q_EMIT errorOccurred(message);
         return false;
+    }
+
+    if (m_streamMedia && !m_mediaServer->start(SharePlayProtocol::MediaPort)) {
+        m_streamMedia = false;
+        Q_EMIT errorOccurred(i18nc("@info, %1 is a port number", "Could not start the media server on port %1", QString::number(SharePlayProtocol::MediaPort)));
     }
 
     setMode(Mode::Host);
@@ -297,7 +298,7 @@ void SharePlayManager::setHostMedia(const QUrl &fileUrl, const QString &title, d
     }
 
     const bool isLocal = fileUrl.isLocalFile();
-    const bool canStream = m_streamMedia && isLocal && m_server->isListening();
+    const bool canStream = m_streamMedia && isLocal && m_mediaServer->isListening();
     m_mediaServer->setFile(canStream ? fileUrl.toLocalFile() : QString());
 
     setMediaTitle(title);
@@ -387,10 +388,10 @@ void SharePlayManager::teardown()
     setDrift(0.0);
     m_client->disconnectFromServer();
     m_server->stop();
+    m_mediaServer->stop();
     m_mediaServer->setFile(QString());
     m_hostMediaUrl.clear();
     setMediaTitle(QString());
-    setMediaUrl(QUrl());
     if (!m_peers.isEmpty()) {
         m_peers.clear();
         Q_EMIT peersChanged();

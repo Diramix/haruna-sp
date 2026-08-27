@@ -70,12 +70,11 @@ public:
     Q_PROPERTY(QString mediaTitle READ mediaTitle NOTIFY mediaTitleChanged)
     QString mediaTitle() const;
 
-    /** client side: the url of the host media, empty when there is none */
-    Q_PROPERTY(QUrl mediaUrl READ mediaUrl NOTIFY mediaUrlChanged)
-    QUrl mediaUrl() const;
-
     Q_PROPERTY(int controlPort READ controlPort CONSTANT)
     int controlPort() const;
+
+    Q_PROPERTY(int mediaPort READ mediaPort CONSTANT)
+    int mediaPort() const;
 
     Q_INVOKABLE bool startHost(const QString &password, bool streamMedia);
     Q_INVOKABLE void connectToHost(const QString &address, const QString &nickname, const QString &password);
@@ -104,7 +103,6 @@ Q_SIGNALS:
     void statusTextChanged();
     void syncThresholdChanged();
     void mediaTitleChanged();
-    void mediaUrlChanged();
     void driftChanged();
 
     /** client side: apply the host state to the local player */
@@ -124,7 +122,6 @@ private:
     void setState(State state);
     void setStatusText(const QString &text);
     void setMediaTitle(const QString &title);
-    void setMediaUrl(const QUrl &url);
     void setDrift(double value);
     void setSpeedFactor(double speed);
     void evaluateSync();
@@ -139,7 +136,6 @@ private:
     QStringList m_peers;
     QString m_statusText;
     QString m_mediaTitle;
-    QUrl m_mediaUrl;
     QString m_nickname;
     double m_syncThreshold{0.8};
     double m_lastPosition{0.0};

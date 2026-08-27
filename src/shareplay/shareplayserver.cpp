@@ -5,13 +5,10 @@
  */
 
 #include "shareplayserver.h"
-#include "shareplaymediaserver.h"
 #include "shareplayprotocol.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QTcpServer>
-#include <QTcpSocket>
 #include <QWebSocket>
 #include <QWebSocketServer>
 
@@ -19,12 +16,8 @@ using namespace Qt::StringLiterals;
 
 SharePlayServer::SharePlayServer(QObject *parent)
     : QObject(parent)
-    , m_listener(new QTcpServer(this))
     , m_server(new QWebSocketServer(u"Haruna SharePlay"_s, QWebSocketServer::NonSecureMode, this))
 {
-    // the WebSocket server never listens on its own, it only gets the sockets
-    // that turn out to be a WebSocket handshake, the rest go to the media server
-    connect(m_listener, &QTcpServer::newConnection, this, &SharePlayServer::onTcpConnection);
     connect(m_server, &QWebSocketServer::newConnection, this, &SharePlayServer::onNewConnection);
 }
 
@@ -33,18 +26,13 @@ SharePlayServer::~SharePlayServer()
     stop();
 }
 
-void SharePlayServer::setMediaServer(SharePlayMediaServer *mediaServer)
-{
-    m_mediaServer = mediaServer;
-}
-
 bool SharePlayServer::start(quint16 port)
 {
-    if (m_listener->isListening()) {
+    if (m_server->isListening()) {
         stop();
     }
     m_clock.start();
-    return m_listener->listen(QHostAddress::Any, port);
+    return m_server->listen(QHostAddress::Any, port);
 }
 
 double SharePlayServer::hostTime() const
@@ -60,66 +48,20 @@ void SharePlayServer::stop()
         peer->deleteLater();
     }
     m_peers.clear();
-    if (m_listener->isListening()) {
-        m_listener->close();
+    if (m_server->isListening()) {
+        m_server->close();
     }
     Q_EMIT peersChanged();
 }
 
 bool SharePlayServer::isListening() const
 {
-    return m_listener->isListening();
+    return m_server->isListening();
 }
 
 QString SharePlayServer::errorString() const
 {
-    return m_listener->errorString();
-}
-
-void SharePlayServer::onTcpConnection()
-{
-    while (QTcpSocket *socket = m_listener->nextPendingConnection()) {
-        connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
-        connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
-            dispatch(socket);
-        });
-    }
-}
-
-void SharePlayServer::dispatch(QTcpSocket *socket)
-{
-    const QByteArray peeked = socket->peek(16 * 1024);
-    const int headerEnd = peeked.indexOf("\r\n\r\n");
-    if (headerEnd < 0) {
-        // wait for the rest of the request headers, unless the client floods us
-        if (peeked.size() >= 16 * 1024) {
-            socket->disconnectFromHost();
-        }
-        return;
-    }
-
-    // the request is complete, this socket is now owned by whoever handles it
-    disconnect(socket, &QTcpSocket::readyRead, this, nullptr);
-    const QByteArray header = peeked.left(headerEnd);
-
-    if (isWebSocketUpgrade(header)) {
-        disconnect(socket, &QTcpSocket::disconnected, socket, nullptr);
-        m_server->handleConnection(socket);
-        return;
-    }
-
-    if (m_mediaServer) {
-        m_mediaServer->handleSocket(socket);
-        return;
-    }
-
-    socket->disconnectFromHost();
-}
-
-bool SharePlayServer::isWebSocketUpgrade(const QByteArray &header)
-{
-    const QByteArray lower = header.toLower();
-    return lower.contains("upgrade:") && lower.contains("websocket");
+    return m_server->errorString();
 }
 
 void SharePlayServer::setPassword(const QString &password)
@@ -149,7 +91,7 @@ QJsonObject SharePlayServer::mediaMessageFor(QWebSocket *peer) const
         const QString host = isIPv4 ? QHostAddress(ipv4).toString() : u"[%1]"_s.arg(address.toString());
         // the token makes the url change whenever the host plays a different file,
         // otherwise the clients can't tell the new stream from the previous one
-        mediaUrl = u"http://%1:%2/media?v=%3"_s.arg(host, QString::number(SharePlayProtocol::ControlPort), QString::number(m_mediaToken));
+        mediaUrl = u"http://%1:%2/media?v=%3"_s.arg(host, QString::number(SharePlayProtocol::MediaPort), QString::number(m_mediaToken));
     }
 
     return QJsonObject{
