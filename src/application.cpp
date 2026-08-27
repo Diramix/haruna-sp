@@ -229,7 +229,7 @@ void Application::setupAboutData()
 
 QString Application::version()
 {
-    return QString::fromStdString(HARUNA_VERSION_STRING);
+    return QString::fromStdString(HARUNA_VERSION_STRING) + u"+sp1.0.0"_s;
 }
 
 QList<QUrl> Application::urls()
