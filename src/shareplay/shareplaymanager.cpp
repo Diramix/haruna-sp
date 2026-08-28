@@ -22,13 +22,8 @@ namespace
 constexpr int SeekSettleMs = 1500;
 /** while the host is paused the position has to match exactly, there is nothing to smooth */
 constexpr double PausedThreshold = 0.05;
-/** below this the drift is left alone, chasing it would only add jitter */
-constexpr double DeadBand = 0.03;
 /** a hard seek always overshoots a little, this covers the time it takes to land */
 constexpr double SeekLead = 0.12;
-/** drift in seconds is turned into a speed change with this gain, capped right below */
-constexpr double SpeedGain = 0.4;
-constexpr double MaxSpeedAdjust = 0.08;
 }
 
 SharePlayManager::SharePlayManager(QObject *parent)
@@ -90,7 +85,10 @@ SharePlayManager::SharePlayManager(QObject *parent)
     connect(m_client, &SharePlayClient::mediaReceived, this, [this](const QUrl &url, const QString &title, double) {
         setMediaTitle(title);
         if (url.isValid() && !url.isEmpty()) {
+            setMediaUrl(url);
             Q_EMIT mediaAvailable(url, title);
+        } else {
+            setMediaUrl(QUrl());
         }
     });
 
@@ -146,6 +144,20 @@ QString SharePlayManager::mediaTitle() const
     return m_mediaTitle;
 }
 
+QUrl SharePlayManager::mediaUrl() const
+{
+    return m_mediaUrl;
+}
+
+void SharePlayManager::setMediaUrl(const QUrl &url)
+{
+    if (m_mediaUrl == url) {
+        return;
+    }
+    m_mediaUrl = url;
+    Q_EMIT mediaUrlChanged();
+}
+
 int SharePlayManager::controlPort() const
 {
     return SharePlayProtocol::ControlPort;
@@ -191,14 +203,9 @@ void SharePlayManager::evaluateSync()
         return;
     }
 
-    if (hostPaused || qAbs(drift) < DeadBand) {
-        setSpeedFactor(1.0);
-        return;
-    }
-
-    // inside the tolerance the drift is absorbed by playing slightly faster or slower,
-    // which is far less jarring than a jump and keeps the error near zero
-    setSpeedFactor(1.0 + qBound(-MaxSpeedAdjust, drift * SpeedGain, MaxSpeedAdjust));
+    // the playback speed stays pinned to 1.0 during a SharePlay session, so a small
+    // drift inside the tolerance is simply left to the next hard seek to correct
+    setSpeedFactor(1.0);
 }
 
 void SharePlayManager::setDrift(double value)
@@ -392,6 +399,7 @@ void SharePlayManager::teardown()
     m_mediaServer->setFile(QString());
     m_hostMediaUrl.clear();
     setMediaTitle(QString());
+    setMediaUrl(QUrl());
     if (!m_peers.isEmpty()) {
         m_peers.clear();
         Q_EMIT peersChanged();
