@@ -225,6 +225,10 @@ ApplicationWindow {
 
         playlistsManager: playlist.manager
 
+        playbackLocked: sharePlay.isActive && !sharePlay.canControl
+        hostUrl: sharePlay.mediaUrl
+        speedLocked: sharePlay.isActive
+
         width: window.contentItem.width
         height: window.isFullScreen()
                 ? window.contentItem.height

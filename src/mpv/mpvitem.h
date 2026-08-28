@@ -178,6 +178,21 @@ public:
     bool isVideo() const;
     void setIsVideo(bool newIsVideo);
 
+    /** while true (SharePlay client) only the host may change the playing file */
+    Q_PROPERTY(bool playbackLocked READ playbackLocked WRITE setPlaybackLocked NOTIFY playbackLockedChanged)
+    bool playbackLocked() const;
+    void setPlaybackLocked(bool newPlaybackLocked);
+
+    /** the only file allowed to load while playbackLocked is true */
+    Q_PROPERTY(QUrl hostUrl READ hostUrl WRITE setHostUrl NOTIFY hostUrlChanged)
+    QUrl hostUrl() const;
+    void setHostUrl(const QUrl &newHostUrl);
+
+    /** while true (any SharePlay connection) the playback speed is pinned to 1.0 */
+    Q_PROPERTY(bool speedLocked READ speedLocked WRITE setSpeedLocked NOTIFY speedLockedChanged)
+    bool speedLocked() const;
+    void setSpeedLocked(bool newSpeedLocked);
+
     Q_INVOKABLE void loadFile(const QString &file);
     Q_INVOKABLE void userCommand(const QString &commandString);
     Q_INVOKABLE void selectSubtitleTrack();
@@ -224,6 +239,9 @@ Q_SIGNALS:
     void osdMessage(const QString &text);
     void isLocalFileChanged();
     void isVideoChanged();
+    void playbackLockedChanged();
+    void hostUrlChanged();
+    void speedLockedChanged();
 
     // signals used for mpris
     void playNext();
@@ -281,6 +299,9 @@ private:
     PlaylistsManager *m_playlistsManager = nullptr;
     bool m_isLocalFile;
     bool m_isVideo;
+    bool m_playbackLocked{false};
+    QUrl m_hostUrl;
+    bool m_speedLocked{false};
     std::unique_ptr<SeekableRangesModel> m_seekableRangesModel;
 };
 

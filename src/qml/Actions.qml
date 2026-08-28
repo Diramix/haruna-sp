@@ -172,19 +172,36 @@ Item {
             }
         }
 
+        function speedChangeIsBlocked() : bool {
+            if (!root.m_sharePlay.isActive) {
+                return false
+            }
+            root.m_osd.message(KI18n.i18nc("@info osd message", "Playback speed is disabled during SharePlay"))
+            return true
+        }
+
         function onPlaybackSpeedIncreaseAction() {
+            if (speedChangeIsBlocked()) {
+                return
+            }
             const speed = parseFloat(root.m_mpv.playbackSpeed + 0.1)
             root.m_mpv.setPlaybackSpeed(speed)
             root.m_osd.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", speed.toFixed(2)))
         }
 
         function onPlaybackSpeedDecreaseAction() {
+            if (speedChangeIsBlocked()) {
+                return
+            }
             const speed = parseFloat(root.m_mpv.playbackSpeed - 0.1)
             root.m_mpv.setPlaybackSpeed(speed)
             root.m_osd.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", speed.toFixed(2)))
         }
 
         function onPlaybackSpeedResetAction() {
+            if (speedChangeIsBlocked()) {
+                return
+            }
             root.m_mpv.setProperty(MpvProperties.Speed, 1.0)
             root.m_osd.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", 1.0))
         }
