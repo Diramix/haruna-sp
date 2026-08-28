@@ -498,10 +498,16 @@ void MpvItem::onPropertyChanged(const QString &property, const QVariant &value)
 
 void MpvItem::loadFile(const QString &file)
 {
+    auto url = QUrl::fromUserInput(file);
+
+    if (m_playbackLocked && !m_hostUrl.isEmpty() && url != m_hostUrl) {
+        Q_EMIT osdMessage(i18nc("@info:tooltip", "Playback is controlled by the host"));
+        return;
+    }
+
     // must be set to always for the playback behavior to work as intended
     setProperty(MpvProperties::self()->KeepOpen, u"always"_s);
 
-    auto url = QUrl::fromUserInput(file);
     if (m_currentUrl != url) {
         m_currentUrl = url;
         Q_EMIT currentUrlChanged();
@@ -775,6 +781,9 @@ void MpvItem::addSubtitles(const QString &subtitlesFile)
 
 void MpvItem::stop()
 {
+    if (m_playbackLocked && !m_hostUrl.isEmpty()) {
+        return;
+    }
     command({u"stop"_s});
     setPlaybackState(PlaybackState::Stopped);
     setPause(true);
@@ -1199,10 +1208,58 @@ double MpvItem::playbackSpeed() const
 
 void MpvItem::setPlaybackSpeed(double newSpeed)
 {
+    if (m_speedLocked && !qFuzzyCompare(newSpeed, 1.0)) {
+        return;
+    }
     if (newSpeed == playbackSpeed()) {
         return;
     }
     setProperty(MpvProperties::self()->Speed, newSpeed);
+}
+
+bool MpvItem::playbackLocked() const
+{
+    return m_playbackLocked;
+}
+
+void MpvItem::setPlaybackLocked(bool newPlaybackLocked)
+{
+    if (m_playbackLocked == newPlaybackLocked) {
+        return;
+    }
+    m_playbackLocked = newPlaybackLocked;
+    Q_EMIT playbackLockedChanged();
+}
+
+QUrl MpvItem::hostUrl() const
+{
+    return m_hostUrl;
+}
+
+void MpvItem::setHostUrl(const QUrl &newHostUrl)
+{
+    if (m_hostUrl == newHostUrl) {
+        return;
+    }
+    m_hostUrl = newHostUrl;
+    Q_EMIT hostUrlChanged();
+}
+
+bool MpvItem::speedLocked() const
+{
+    return m_speedLocked;
+}
+
+void MpvItem::setSpeedLocked(bool newSpeedLocked)
+{
+    if (m_speedLocked == newSpeedLocked) {
+        return;
+    }
+    m_speedLocked = newSpeedLocked;
+    Q_EMIT speedLockedChanged();
+    if (m_speedLocked) {
+        setPlaybackSpeed(1.0);
+    }
 }
 
 bool MpvItem::isLocalFile() const
