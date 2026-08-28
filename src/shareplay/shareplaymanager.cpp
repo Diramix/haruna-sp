@@ -37,6 +37,8 @@ SharePlayManager::SharePlayManager(QObject *parent)
     , m_mediaServer(new SharePlayMediaServer(this))
     , m_client(new SharePlayClient(this))
 {
+    m_server->setMediaServer(m_mediaServer);
+
     connect(m_server, &SharePlayServer::peersChanged, this, [this]() {
         m_peers = m_server->peerNames();
         Q_EMIT peersChanged();
@@ -151,11 +153,6 @@ int SharePlayManager::controlPort() const
     return SharePlayProtocol::ControlPort;
 }
 
-int SharePlayManager::mediaPort() const
-{
-    return SharePlayProtocol::MediaPort;
-}
-
 double SharePlayManager::drift() const
 {
     return m_drift;
@@ -246,11 +243,6 @@ bool SharePlayManager::startHost(const QString &password, bool streamMedia)
         return false;
     }
 
-    if (m_streamMedia && !m_mediaServer->start(SharePlayProtocol::MediaPort)) {
-        m_streamMedia = false;
-        Q_EMIT errorOccurred(i18nc("@info, %1 is a port number", "Could not start the media server on port %1", QString::number(SharePlayProtocol::MediaPort)));
-    }
-
     setMode(Mode::Host);
     setState(State::Connected);
     setStatusText(i18nc("@info:status shareplay", "Hosting"));
@@ -298,7 +290,7 @@ void SharePlayManager::setHostMedia(const QUrl &fileUrl, const QString &title, d
     }
 
     const bool isLocal = fileUrl.isLocalFile();
-    const bool canStream = m_streamMedia && isLocal && m_mediaServer->isListening();
+    const bool canStream = m_streamMedia && isLocal && m_server->isListening();
     m_mediaServer->setFile(canStream ? fileUrl.toLocalFile() : QString());
 
     setMediaTitle(title);
@@ -388,7 +380,6 @@ void SharePlayManager::teardown()
     setDrift(0.0);
     m_client->disconnectFromServer();
     m_server->stop();
-    m_mediaServer->stop();
     m_mediaServer->setFile(QString());
     m_hostMediaUrl.clear();
     setMediaTitle(QString());

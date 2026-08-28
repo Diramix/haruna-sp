@@ -10,13 +10,15 @@
 #include <QObject>
 #include <QString>
 
-class QTcpServer;
 class QTcpSocket;
 
 /**
- * Minimal HTTP/1.1 server that serves a single local file, the one the host is
+ * Minimal HTTP/1.1 handler that serves a single local file, the one the host is
  * currently playing. The request path is ignored on purpose, so it can never be
  * used to read anything else from the file system.
+ *
+ * It does not own a listening socket: the sockets are accepted by SharePlayServer
+ * on the shared control port and handed over through handleSocket().
  */
 class SharePlayMediaServer : public QObject
 {
@@ -26,20 +28,16 @@ public:
     explicit SharePlayMediaServer(QObject *parent = nullptr);
     ~SharePlayMediaServer() override;
 
-    bool start(quint16 port);
-    void stop();
-    bool isListening() const;
-    quint16 port() const;
+    /** take over an already accepted connection and answer the HTTP request on it */
+    void handleSocket(QTcpSocket *socket);
 
     void setFile(const QString &path);
     QString file() const;
 
 private:
-    void onNewConnection();
     void handleRequest(QTcpSocket *socket, const QByteArray &request);
     void sendError(QTcpSocket *socket, int code, const QString &text);
 
-    QTcpServer *m_server{nullptr};
     QString m_file;
 };
 

@@ -14,8 +14,11 @@
 #include <QStringList>
 #include <QUrl>
 
+class QTcpServer;
+class QTcpSocket;
 class QWebSocket;
 class QWebSocketServer;
+class SharePlayMediaServer;
 
 class SharePlayServer : public QObject
 {
@@ -30,6 +33,9 @@ public:
     bool isListening() const;
     QString errorString() const;
 
+    /** where plain HTTP requests on the shared port are forwarded */
+    void setMediaServer(SharePlayMediaServer *mediaServer);
+
     void setPassword(const QString &password);
     void setMedia(const QString &name, double duration, bool available, quint64 token);
     void broadcastState(double position, bool paused);
@@ -42,6 +48,9 @@ Q_SIGNALS:
     void pauseRequested(const QString &name, bool paused, QWebSocket *peer);
 
 private:
+    void onTcpConnection();
+    void dispatch(QTcpSocket *socket);
+    static bool isWebSocketUpgrade(const QByteArray &header);
     void onNewConnection();
     void onTextMessage(QWebSocket *peer, const QString &message);
     void removePeer(QWebSocket *peer);
@@ -53,7 +62,9 @@ private:
     /** milliseconds since the session started, the reference the clients sync their clock to */
     double hostTime() const;
 
+    QTcpServer *m_listener{nullptr};
     QWebSocketServer *m_server{nullptr};
+    SharePlayMediaServer *m_mediaServer{nullptr};
     QElapsedTimer m_clock;
     QHash<QWebSocket *, QString> m_peers;
     QString m_password;

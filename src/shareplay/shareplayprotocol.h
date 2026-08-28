@@ -12,11 +12,10 @@
 
 namespace SharePlayProtocol
 {
-constexpr int Version = 2;
+constexpr int Version = 3;
 
-/** control channel, the media is served on ControlPort + 1 */
+/** control channel and media stream share this single port */
 constexpr quint16 ControlPort = 7439;
-constexpr quint16 MediaPort = ControlPort + 1;
 
 namespace Type
 {
