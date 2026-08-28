@@ -9,7 +9,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMimeDatabase>
-#include <QTcpServer>
 #include <QTcpSocket>
 
 using namespace Qt::StringLiterals;
@@ -26,40 +25,10 @@ QByteArray httpDate()
 
 SharePlayMediaServer::SharePlayMediaServer(QObject *parent)
     : QObject(parent)
-    , m_server(new QTcpServer(this))
 {
-    connect(m_server, &QTcpServer::newConnection, this, &SharePlayMediaServer::onNewConnection);
 }
 
-SharePlayMediaServer::~SharePlayMediaServer()
-{
-    stop();
-}
-
-bool SharePlayMediaServer::start(quint16 port)
-{
-    if (m_server->isListening()) {
-        stop();
-    }
-    return m_server->listen(QHostAddress::Any, port);
-}
-
-void SharePlayMediaServer::stop()
-{
-    if (m_server->isListening()) {
-        m_server->close();
-    }
-}
-
-bool SharePlayMediaServer::isListening() const
-{
-    return m_server->isListening();
-}
-
-quint16 SharePlayMediaServer::port() const
-{
-    return m_server->serverPort();
-}
+SharePlayMediaServer::~SharePlayMediaServer() = default;
 
 void SharePlayMediaServer::setFile(const QString &path)
 {
@@ -71,25 +40,29 @@ QString SharePlayMediaServer::file() const
     return m_file;
 }
 
-void SharePlayMediaServer::onNewConnection()
+void SharePlayMediaServer::handleSocket(QTcpSocket *socket)
 {
-    while (auto *socket = m_server->nextPendingConnection()) {
-        auto buffer = std::make_shared<QByteArray>();
-        connect(socket, &QTcpSocket::readyRead, socket, [this, socket, buffer]() {
-            buffer->append(socket->readAll());
-            if (buffer->size() > 16 * 1024) {
-                sendError(socket, 431, u"Request Header Fields Too Large"_s);
-                return;
-            }
-            const int headerEnd = buffer->indexOf("\r\n\r\n");
-            if (headerEnd < 0) {
-                return;
-            }
-            const QByteArray request = buffer->left(headerEnd);
-            buffer->clear();
-            handleRequest(socket, request);
-        });
-        connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+    connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+
+    auto buffer = std::make_shared<QByteArray>();
+    auto readHeader = [this, socket, buffer]() {
+        buffer->append(socket->readAll());
+        if (buffer->size() > 16 * 1024) {
+            sendError(socket, 431, u"Request Header Fields Too Large"_s);
+            return;
+        }
+        const int headerEnd = buffer->indexOf("\r\n\r\n");
+        if (headerEnd < 0) {
+            return;
+        }
+        const QByteArray request = buffer->left(headerEnd);
+        buffer->clear();
+        handleRequest(socket, request);
+    };
+    connect(socket, &QTcpSocket::readyRead, socket, readHeader);
+    // the request line may already be buffered on the socket from the dispatch peek
+    if (socket->bytesAvailable() > 0) {
+        readHeader();
     }
 }
 

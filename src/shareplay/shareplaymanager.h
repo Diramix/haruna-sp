@@ -73,9 +73,6 @@ public:
     Q_PROPERTY(int controlPort READ controlPort CONSTANT)
     int controlPort() const;
 
-    Q_PROPERTY(int mediaPort READ mediaPort CONSTANT)
-    int mediaPort() const;
-
     Q_INVOKABLE bool startHost(const QString &password, bool streamMedia);
     Q_INVOKABLE void connectToHost(const QString &address, const QString &nickname, const QString &password);
     Q_INVOKABLE void leave();
