@@ -27,7 +27,6 @@ Item {
     required property SettingsWindow m_settingsLoader
     required property Osd m_osd
     required property Footer m_footer
-    required property SelectActionPopup m_triggerActionPopup
     required property InputPopup m_openUrlPopup
 
     function playbackIsRemote() : bool {
@@ -78,7 +77,9 @@ Item {
         target: Models.actionsModel
 
         function onOpenActionsDialogAction() {
-            root.m_triggerActionPopup.open()
+            const item = selectActionPopupComponent.createObject(root.m_mpv)
+            const actionsPopup = item as SelectActionPopup
+            actionsPopup.open()
         }
 
         function onAboutHarunaAction() {
@@ -569,6 +570,19 @@ Item {
         function onSaturationResetAction() {
             root.m_mpv.setProperty(MpvProperties.Saturation, 0)
             root.m_osd.message(KI18n.i18nc("@info:tooltip", "Saturation: 0"))
+        }
+    }
+
+    Component {
+        id: selectActionPopupComponent
+
+        SelectActionPopup {
+            id: triggerActionPopup
+
+            onActionSelected: function(actionName) {
+                HarunaApp.actions[actionName].trigger()
+            }
+            onClosed: destroy()
         }
     }
 }
