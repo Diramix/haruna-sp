@@ -304,11 +304,7 @@ ApplicationWindow {
         Connections {
             target: actions
             function onToggleTranscript() {
-                if (transcript.state === "visible") {
-                    transcript.state = "hidden"
-                } else {
-                    transcript.state = "visible"
-                }
+                transcript.toggle()
             }
         }
 
