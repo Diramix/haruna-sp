@@ -9,6 +9,7 @@
 #define MPVOBJECT_H
 
 #include <MpvAbstractItem>
+#include <QElapsedTimer>
 
 class SeekableRangesModel;
 class ChaptersModel;
@@ -303,6 +304,7 @@ private:
     QUrl m_hostUrl;
     bool m_speedLocked{false};
     std::unique_ptr<SeekableRangesModel> m_seekableRangesModel;
+    QElapsedTimer m_positionChangeTimer;
 };
 
 #endif // MPVOBJECT_H
