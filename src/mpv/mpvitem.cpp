@@ -27,6 +27,7 @@
 #include "lockmanager.h"
 #include "miscutils.h"
 #include "mpvproperties.h"
+#include "osdutils.h"
 #include "pathutils.h"
 #include "playbacksettings.h"
 #include "playlistsettings.h"
@@ -426,7 +427,7 @@ void MpvItem::onPropertyChanged(const QString &property, const QVariant &value)
         AudioSettings::setVolume(m_volume);
         AudioSettings::self()->save();
 
-        Q_EMIT osdMessage(i18nc("@info:tooltip", "Volume: %1", m_volume));
+        OsdUtils::instance().message(i18nc("@info:tooltip", "Volume: %1", m_volume), OsdUtils::Context::MpvVolume);
 
     } else if (property == MpvProperties::self()->VolumeMax) {
         m_volumeMax = value.toInt();
@@ -459,9 +460,9 @@ void MpvItem::onPropertyChanged(const QString &property, const QVariant &value)
         auto delay = QString::number(value.toDouble(), 'f', 2).toDouble();
         auto delayString = QLocale().toString(delay, 'f', 2);
         if (delay > 0) {
-            Q_EMIT osdMessage(i18nc("@info:tooltip", "Subtitle timing: +%1 seconds", delayString));
+            OsdUtils::instance().message(i18nc("@info:tooltip", "Subtitle timing: +%1 seconds", delayString), OsdUtils::Context::MpvSubtitleDelay);
         } else {
-            Q_EMIT osdMessage(i18nc("@info:tooltip", "Subtitle timing: %1 seconds", delayString));
+            OsdUtils::instance().message(i18nc("@info:tooltip", "Subtitle timing: %1 seconds", delayString), OsdUtils::Context::MpvSubtitleDelay);
         }
 
     } else if (property == MpvProperties::self()->Width) {
@@ -550,7 +551,7 @@ void MpvItem::loadFile(const QString &file)
     const auto msg = i18nc("%1 current item number, %2 total items count, %3 item name",
                            "[%1/%2] %3", playingRow + 1, playlistModel->rowCount(), itemName);
     // clang-format on
-    Q_EMIT osdMessage(msg);
+    OsdUtils::instance().message(msg, OsdUtils::Context::MpvLoadFile);
 }
 
 void MpvItem::loadTracks(const QList<QVariant> &tracks)
@@ -620,14 +621,14 @@ void MpvItem::onAsyncReply(const QVariant &data, mpv_event event)
     }
     case AsyncIds::Screenshot: {
         if (event.error < 0) {
-            Q_EMIT osdMessage(i18nc("@info:tooltip osd", "Screenshot failed"));
+            OsdUtils::instance().message(i18nc("@info:tooltip osd", "Screenshot failed"), OsdUtils::Context::MpvScreenshot);
             break;
         }
         auto filename = data.toMap().value(u"filename"_s).toString();
         if (filename.isEmpty()) {
-            Q_EMIT osdMessage(i18nc("@info:tooltip osd", "Screenshot taken"));
+            OsdUtils::instance().message(i18nc("@info:tooltip osd", "Screenshot taken"), OsdUtils::Context::MpvScreenshot);
         } else {
-            Q_EMIT osdMessage(i18nc("@info:tooltip osd; %1 is a filename with path", "Screenshot: %1", filename));
+            OsdUtils::instance().message(i18nc("@info:tooltip osd; %1 is a filename with path", "Screenshot: %1"), OsdUtils::Context::MpvScreenshot);
         }
         break;
     }
@@ -698,7 +699,7 @@ void MpvItem::onChapterChanged()
         if (title.contains(_word, Qt::CaseInsensitive)) {
             command({u"add"_s, u"chapter"_s, u"1"_s});
             if (PlaybackSettings::showOsdOnSkipChapters()) {
-                Q_EMIT osdMessage(i18nc("@info:tooltip osd", "Skipped chapter: %1", title));
+                OsdUtils::instance().message(i18nc("@info:tooltip osd", "Skipped chapter: %1", title), OsdUtils::Context::MpvChapter);
             }
             return;
         }
@@ -799,7 +800,7 @@ void MpvItem::setTrack(int row, TrackType type)
             "Audio: %1 %2",
             row + 1,
             track.display());
-        Q_EMIT osdMessage(msg);
+        OsdUtils::instance().message(msg, OsdUtils::Context::MpvTrack);
         break;
     }
     case TrackType::Subtitle: {
@@ -807,7 +808,8 @@ void MpvItem::setTrack(int row, TrackType type)
         setProperty(MpvProperties::self()->SubtitleId, track.trackid);
         m_subtitleTracksModel->setActiveRow(row);
         if (row == 0) {
-            Q_EMIT osdMessage(i18nc("@info:tooltip; osd message when no sub is selected", "Subtitle: none"));
+            auto msg = i18nc("@info:tooltip; osd message when no sub is selected", "Subtitle: none");
+            OsdUtils::instance().message(msg, OsdUtils::Context::MpvTrack);
         } else {
             auto msg = i18nc(
                 "@info:tooltip; %1 is the track number, "
@@ -815,7 +817,7 @@ void MpvItem::setTrack(int row, TrackType type)
                 "Subtitle: %1 %2",
                 row,
                 track.display());
-            Q_EMIT osdMessage(msg);
+            OsdUtils::instance().message(msg, OsdUtils::Context::MpvTrack);
         }
         break;
     }
@@ -823,7 +825,8 @@ void MpvItem::setTrack(int row, TrackType type)
         auto track = m_subtitleTracksModel->track(row);
         setProperty(MpvProperties::self()->SecondarySubtitleId, track.trackid);
         if (row == 0) {
-            Q_EMIT osdMessage(i18nc("@info:tooltip; osd message when no sub is selected", "Secondary subtitle: none"));
+            auto msg = i18nc("@info:tooltip; osd message when no sub is selected", "Secondary subtitle: none");
+            OsdUtils::instance().message(msg, OsdUtils::Context::MpvTrack);
         } else {
             auto msg = i18nc(
                 "@info:tooltip; %1 is the track number, "
@@ -831,7 +834,7 @@ void MpvItem::setTrack(int row, TrackType type)
                 "Subtitle: %1 %2",
                 row,
                 track.display());
-            Q_EMIT osdMessage(msg);
+            OsdUtils::instance().message(msg, OsdUtils::Context::MpvTrack);
         }
         break;
     }

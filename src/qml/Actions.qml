@@ -25,7 +25,6 @@ Item {
     required property PlaylistsManager playlistsManager
     required property MpvContextMenu m_mpvContextMenuLoader
     required property SettingsWindow m_settingsLoader
-    required property Osd m_osd
     required property Footer m_footer
     required property InputPopup m_openUrlPopup
 
@@ -65,7 +64,7 @@ Item {
                 }
                 if (delegate.actionType === "CustomAction") {
                     root.m_mpv.userCommand(delegate.actionText)
-                    root.m_osd.message(root.m_mpv.expandText(delegate.actionDescription))
+                    OsdUtils.message(root.m_mpv.expandText(delegate.actionDescription), OsdUtils.Context.None)
                 }
             }
 
@@ -156,9 +155,9 @@ Item {
 
         function onAddExternalSubtitleAction() {
             if (root.m_mpv.currentUrl.toString() === "") {
-                const osdMsg = KI18n.i18nc("osd message when trying to open subtitle selection dialog while no file is open",
-                                     "Can’t load subtitle when no file is open")
-                root.m_osd.message(osdMsg)
+                const msg = KI18n.i18nc("osd message when trying to open subtitle selection dialog while no file is open",
+                                        "Can’t load subtitle when no file is open")
+                MiscUtils.error(msg)
                 return
             }
 
@@ -187,7 +186,7 @@ Item {
             }
             const speed = parseFloat(root.m_mpv.playbackSpeed + 0.1)
             root.m_mpv.setPlaybackSpeed(speed)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", speed.toFixed(2)))
+            OsdUtils.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", speed.toFixed(2)), OsdUtils.Context.MpvPlaybackSpeed)
         }
 
         function onPlaybackSpeedDecreaseAction() {
@@ -196,7 +195,7 @@ Item {
             }
             const speed = parseFloat(root.m_mpv.playbackSpeed - 0.1)
             root.m_mpv.setPlaybackSpeed(speed)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", speed.toFixed(2)))
+            OsdUtils.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", speed.toFixed(2)), OsdUtils.Context.MpvPlaybackSpeed)
         }
 
         function onPlaybackSpeedResetAction() {
@@ -204,7 +203,7 @@ Item {
                 return
             }
             root.m_mpv.setProperty(MpvProperties.Speed, 1.0)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", 1.0))
+            OsdUtils.message(KI18n.i18nc("@info:tooltip", "Playback speed: %1", 1.0), OsdUtils.Context.MpvPlaybackSpeed)
         }
 
         function onPlayPauseAction() {
@@ -357,19 +356,26 @@ Item {
             if (!aIsSet && !bIsSet) {
                 root.m_mpv.setProperty(MpvProperties.ABLoopA, root.m_mpv.position)
                 root.m_footer.progressBar.loopIndicator.startPosition = root.m_mpv.position
-                root.m_osd.message(KI18n.i18nc("@info:tooltip; %1 is the timestamp where the loop starts", "Loop start: %1", MiscUtils.formatTime(root.m_mpv.position)))
+                const msg = KI18n.i18nc("@info:tooltip; %1 is the timestamp where the loop starts",
+                                        "Loop start: %1",
+                                        MiscUtils.formatTime(root.m_mpv.position))
+                OsdUtils.message(msg, OsdUtils.Context.MpvABLoop)
             } else if (aIsSet && !bIsSet) {
                 // set b position slightly ahead to ensure the loop section is not skipped
                 const bPosition = root.m_mpv.position + 0.1
                 root.m_mpv.setPropertyBlocking(MpvProperties.ABLoopB, bPosition)
                 root.m_footer.progressBar.loopIndicator.endPosition = bPosition
-                root.m_osd.message(KI18n.i18nc("@info:tooltip, use en dash for the range", "Loop: %1–%2", MiscUtils.formatTime(a), MiscUtils.formatTime(bPosition)))
+                const msg = KI18n.i18nc("@info:tooltip, use en dash for the range",
+                                        "Loop: %1–%2",
+                                        MiscUtils.formatTime(a), MiscUtils.formatTime(bPosition))
+                OsdUtils.message(msg, OsdUtils.Context.MpvABLoop)
             } else {
                 root.m_mpv.setProperty(MpvProperties.ABLoopA, "no")
                 root.m_mpv.setProperty(MpvProperties.ABLoopB, "no")
                 root.m_footer.progressBar.loopIndicator.startPosition = -1
                 root.m_footer.progressBar.loopIndicator.endPosition = -1
-                root.m_osd.message(KI18n.i18nc("@info:tooltip", "Loop cleared"))
+                const msg = KI18n.i18nc("@info:tooltip", "Loop cleared")
+                OsdUtils.message(msg, OsdUtils.Context.MpvABLoop)
             }
         }
 
@@ -391,7 +397,7 @@ Item {
             const visible = root.m_mpv.getProperty(MpvProperties.SubtitleVisibility)
             const message = visible ? KI18n.i18nc("@info:tooltip", "Subtitles off") : KI18n.i18nc("@info:tooltip", "Subtitles on")
             root.m_mpv.setProperty(MpvProperties.SubtitleVisibility, !visible)
-            root.m_osd.message(message)
+            OsdUtils.message(message, OsdUtils.Context.MpvSubtitleToggle)
         }
 
         function onSubtitleCycleUpAction() {
@@ -405,13 +411,15 @@ Item {
         function onSubtitleIncreaseFontSizeAction() {
             const subScale = parseFloat(root.m_mpv.getProperty(MpvProperties.SubtitleScale) + 0.1)
             root.m_mpv.setProperty(MpvProperties.SubtitleScale, subScale)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Subtitle scale: %1", subScale.toFixed(1)))
+            const msg = KI18n.i18nc("@info:tooltip", "Subtitle scale: %1", subScale.toFixed(1))
+            OsdUtils.message(msg, OsdUtils.Context.MpvSubtitleScale)
         }
 
         function onSubtitleDecreaseFontSizeAction() {
             const subScale = parseFloat(root.m_mpv.getProperty(MpvProperties.SubtitleScale) - 0.1)
             root.m_mpv.setProperty(MpvProperties.SubtitleScale, subScale)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Subtitle scale: %1", subScale.toFixed(1)))
+            const msg = KI18n.i18nc("@info:tooltip", "Subtitle scale: %1", subScale.toFixed(1))
+            OsdUtils.message(msg, OsdUtils.Context.MpvSubtitleScale)
         }
 
         function onSubtitleMoveUpAction() {
@@ -425,7 +433,8 @@ Item {
         function onToggleDeinterlacingAction() {
             const deinterlaced = !root.m_mpv.getProperty(MpvProperties.Deinterlace)
             root.m_mpv.setProperty(MpvProperties.Deinterlace, deinterlaced)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Deinterlace: %1", deinterlaced))
+            const msg = KI18n.i18nc("@info:tooltip", "Deinterlace: %1", deinterlaced)
+            OsdUtils.message(msg, OsdUtils.Context.MpvDeinterlace)
         }
 
         function onToggleFullscreenAction() {
@@ -490,86 +499,101 @@ Item {
         function onZoomInAction() {
             const zoom = parseFloat(root.m_mpv.getProperty(MpvProperties.VideoZoom) + 0.1)
             root.m_mpv.setProperty(MpvProperties.VideoZoom, zoom)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Zoom: %1", zoom.toFixed(2)))
+            const msg = KI18n.i18nc("@info:tooltip", "Zoom: %1", zoom.toFixed(2))
+            OsdUtils.message(msg, OsdUtils.Context.MpvZoom)
         }
 
         function onZoomOutAction() {
             const zoom = parseFloat(root.m_mpv.getProperty(MpvProperties.VideoZoom) - 0.1)
             root.m_mpv.setProperty(MpvProperties.VideoZoom, zoom)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Zoom: %1", zoom.toFixed(2)))
+            const msg = KI18n.i18nc("@info:tooltip", "Zoom: %1", zoom.toFixed(2))
+            OsdUtils.message(msg, OsdUtils.Context.MpvZoom)
         }
 
         function onZoomResetAction() {
             root.m_mpv.setProperty(MpvProperties.VideoZoom, 0)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Zoom: 0"))
+            const msg = KI18n.i18nc("@info:tooltip", "Zoom: 0")
+            OsdUtils.message(msg, OsdUtils.Context.MpvZoom)
         }
 
         function onContrastUpAction() {
             const contrast = parseInt(root.m_mpv.getProperty(MpvProperties.Contrast)) + 1
             root.m_mpv.setProperty(MpvProperties.Contrast, `${contrast}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Contrast: %1", contrast))
+            const msg = KI18n.i18nc("@info:tooltip", "Contrast: %1", contrast)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onContrastDownAction() {
             const contrast = parseInt(root.m_mpv.getProperty(MpvProperties.Contrast)) - 1
             root.m_mpv.setProperty(MpvProperties.Contrast, `${contrast}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Contrast: %1", contrast))
+            const msg = KI18n.i18nc("@info:tooltip", "Contrast: %1", contrast)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onContrastResetAction() {
             root.m_mpv.setProperty(MpvProperties.Contrast, 0)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Contrast: 0"))
+            const msg = KI18n.i18nc("@info:tooltip", "Contrast: 0")
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onBrightnessUpAction() {
             const brightness = parseInt(root.m_mpv.getProperty(MpvProperties.Brightness)) + 1
             root.m_mpv.setProperty(MpvProperties.Brightness, `${brightness}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Brightness: %1", brightness))
+            const msg = KI18n.i18nc("@info:tooltip", "Brightness: %1", brightness)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onBrightnessDownAction() {
             const brightness = parseInt(root.m_mpv.getProperty(MpvProperties.Brightness)) - 1
             root.m_mpv.setProperty(MpvProperties.Brightness, `${brightness}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Brightness: %1", brightness))
+            const msg = KI18n.i18nc("@info:tooltip", "Brightness: %1", brightness)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onBrightnessResetAction() {
             root.m_mpv.setProperty(MpvProperties.Brightness, 0)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Brightness: 0"))
+            const msg = KI18n.i18nc("@info:tooltip", "Brightness: 0")
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onGammaUpAction() {
             const gamma = parseInt(root.m_mpv.getProperty(MpvProperties.Gamma)) + 1
             root.m_mpv.setProperty(MpvProperties.Gamma, `${gamma}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Gamma: %1", gamma))
+            const msg = KI18n.i18nc("@info:tooltip", "Gamma: %1", gamma)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onGammaDownAction() {
             const gamma = parseInt(root.m_mpv.getProperty(MpvProperties.Gamma)) - 1
             root.m_mpv.setProperty(MpvProperties.Gamma, `${gamma}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Gamma: %1", gamma))
+            const msg = KI18n.i18nc("@info:tooltip", "Gamma: %1", gamma)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onGammaResetAction() {
             root.m_mpv.setProperty(MpvProperties.Gamma, 0)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Gamma: 0"))
+            const msg = KI18n.i18nc("@info:tooltip", "Gamma: 0")
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onSaturationUpAction() {
             const saturation = parseInt(root.m_mpv.getProperty(MpvProperties.Saturation)) + 1
             root.m_mpv.setProperty(MpvProperties.Saturation, `${saturation}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Saturation: %1", saturation))
+            const msg = KI18n.i18nc("@info:tooltip", "Saturation: %1", saturation)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onSaturationDownAction() {
             const saturation = parseInt(root.m_mpv.getProperty(MpvProperties.Saturation)) - 1
             root.m_mpv.setProperty(MpvProperties.Saturation, `${saturation}`)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Saturation: %1", saturation))
+            const msg = KI18n.i18nc("@info:tooltip", "Saturation: %1", saturation)
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
 
         function onSaturationResetAction() {
             root.m_mpv.setProperty(MpvProperties.Saturation, 0)
-            root.m_osd.message(KI18n.i18nc("@info:tooltip", "Saturation: 0"))
+            const msg = KI18n.i18nc("@info:tooltip", "Saturation: 0")
+            OsdUtils.message(msg, OsdUtils.Context.MpvImageAdjustments)
         }
     }
 
