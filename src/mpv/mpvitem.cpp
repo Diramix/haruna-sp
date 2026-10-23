@@ -644,6 +644,7 @@ void MpvItem::onAsyncReply(const QVariant &data, mpv_event event)
     }
     case AsyncIds::ChapterList: {
         QList<Chapter> chaptersList;
+        QMap<double, QString> startTimeToTitleMap;
         const auto chapters = data.toList();
         for (const auto &chapter : chapters) {
             const auto map = chapter.toMap();
@@ -651,8 +652,10 @@ void MpvItem::onAsyncReply(const QVariant &data, mpv_event event)
             c.title = map.value(u"title"_s).toString();
             c.startTime = map.value(u"time"_s).toDouble();
             chaptersList.append(c);
+            startTimeToTitleMap.insert(c.startTime, c.title);
         }
         m_chaptersModel->setChapters(chaptersList);
+        m_chaptersModel->setStartTimeToTitleMap(startTimeToTitleMap);
         break;
     }
     case AsyncIds::VideoId: {
