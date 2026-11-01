@@ -79,6 +79,9 @@ mkdir -p "$egl"
 cp /usr/lib/qt6/plugins/wayland-graphics-integration-client/libqt-plugin-wayland-egl.so "$egl/"
 patchelf --set-rpath '$ORIGIN/../../lib:$ORIGIN' "$egl/libqt-plugin-wayland-egl.so"
 
+# appimagetool requires a raster icon at the AppDir root for .DirIcon.
+cp "$appdir/usr/share/icons/hicolor/256x256/apps/haruna.png" "$appdir/haruna.png"
+
 linuxdeploy \
     --appdir "$appdir" \
     --output appimage \
