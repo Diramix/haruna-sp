@@ -20,7 +20,7 @@ jobs:
             ffmpeg mpvqt kdsingleapplication kcolorscheme kconfig kcoreaddons kcrash kdeclarative \
             kfilemetadata ki18n kiconthemes kio kirigami kitemmodels kservice kwindowsystem \
             qqc2-desktop-style breeze-icons qt6-5compat qt6-base qt6-declarative qt6-websockets \
-            qt6-shadertools qt6-wayland patchelf curl fuse2
+            qt6-shadertools qt6-wayland gtk3 patchelf curl fuse2
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ github.event.release.tag_name }}
@@ -95,6 +95,8 @@ jobs:
           $text = $text.Replace('PackageDebugSymbols = True', 'PackageDebugSymbols = False')
           if (-not $text.Contains('PackageType = NullsoftInstallerPackager')) { throw 'Cannot configure NSIS packager' }
           [IO.File]::WriteAllText($settings, $text)
+          # Craft clears the console on startup, but GitHub Actions has no console handle.
+          function Clear-Host { }
           . C:\CraftRoot\craft\craftenv.ps1
           $blueprints = @(Get-ChildItem C:\CraftRoot\etc\blueprints -Recurse -Filter haruna.py | Where-Object { $_.FullName -match 'kdemultimedia[\\/]haruna[\\/]haruna\.py$' })
           if ($blueprints.Count -ne 1) { throw "Expected one Haruna blueprint, found $($blueprints.Count)" }
