@@ -14,6 +14,7 @@ depends=('ffmpeg' 'glibc' 'hicolor-icon-theme' 'kcolorscheme' 'kconfig' 'kcoread
 makedepends=('cmake' 'extra-cmake-modules' 'ninja' 'qt6-shadertools')
 optdepends=('yt-dlp: online video support')
 conflicts=('haruna')
+options=('!debug')
 
 build() {
     cmake -S "$startdir/.." -B "$srcdir/build" -G Ninja \
