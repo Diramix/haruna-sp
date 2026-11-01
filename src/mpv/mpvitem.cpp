@@ -501,7 +501,7 @@ void MpvItem::loadFile(const QString &file)
     auto url = QUrl::fromUserInput(file);
 
     if (m_playbackLocked && !m_hostUrl.isEmpty() && url != m_hostUrl) {
-        Q_EMIT osdMessage(i18nc("@info:tooltip", "Playback is controlled by the host"));
+        OsdUtils::instance().message(i18nc("@info:tooltip", "Playback is controlled by the host"), OsdUtils::Context::None);
         return;
     }
 
