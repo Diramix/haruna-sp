@@ -112,6 +112,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Setting Haruna target failed' }
           craft nsis
           if ($LASTEXITCODE -ne 0) { throw 'Installing NSIS failed' }
+          craft --use-cache --install-deps kde/kdemultimedia/haruna
+          if ($LASTEXITCODE -ne 0) { throw 'Installing Haruna dependencies failed' }
           craft --no-cache kde/kdemultimedia/haruna
           if ($LASTEXITCODE -ne 0) { throw 'Haruna build failed' }
           craft --package kde/kdemultimedia/haruna
