@@ -4,12 +4,19 @@ name: Release builds
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit or tag to test
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   linux:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     container: archlinux:latest
     timeout-minutes: 180
@@ -55,74 +62,105 @@ jobs:
 
   windows:
     runs-on: windows-2022
-    timeout-minutes: 360
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ github.event.release.tag_name }}
-          fetch-depth: 0
+          ref: ${{ github.event_name == 'release' && format('refs/tags/{0}', github.event.release.tag_name) || inputs.ref }}
           persist-credentials: false
-
-      - uses: actions/setup-python@v5
+      - uses: msys2/setup-msys2@v2
         with:
-          python-version: '3.11'
-
-      - name: Bootstrap Craft (MinGW x86-64)
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-extra-cmake-modules
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-mpv
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-kdsingleapplication
+            mingw-w64-ucrt-x86_64-kcolorscheme
+            mingw-w64-ucrt-x86_64-kconfig
+            mingw-w64-ucrt-x86_64-kcoreaddons
+            mingw-w64-ucrt-x86_64-kcrash
+            mingw-w64-ucrt-x86_64-kdeclarative
+            mingw-w64-ucrt-x86_64-kfilemetadata
+            mingw-w64-ucrt-x86_64-ki18n
+            mingw-w64-ucrt-x86_64-kiconthemes
+            mingw-w64-ucrt-x86_64-kio
+            mingw-w64-ucrt-x86_64-kirigami
+            mingw-w64-ucrt-x86_64-kwindowsystem
+            mingw-w64-ucrt-x86_64-qqc2-desktop-style
+            mingw-w64-ucrt-x86_64-breeze-icons
+            mingw-w64-ucrt-x86_64-qt6-5compat
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-websockets
+            mingw-w64-ucrt-x86_64-qt6-shadertools
+            mingw-w64-ucrt-x86_64-nsis
+      - name: Build MpvQt
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v1.2.1 https://github.com/KDE/mpvqt.git "$RUNNER_TEMP/mpvqt"
+          cmake -S "$RUNNER_TEMP/mpvqt" -B "$RUNNER_TEMP/mpvqt-build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/ucrt64 -DBUILD_TESTING=OFF
+          cmake --build "$RUNNER_TEMP/mpvqt-build" --parallel
+          cmake --install "$RUNNER_TEMP/mpvqt-build"
+      - name: Build Haruna
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/haruna-stage" -DBUILD_TESTING=OFF
+          cmake --build build --parallel
+          cmake --install build
+      - name: Package installer
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/haruna-stage"
+          cp /ucrt64/bin/*.dll "$stage/bin/"
+          cp -r /ucrt64/share/qt6/plugins "$stage/bin/"
+          cp -r /ucrt64/share/qt6/qml "$stage/bin/"
+          if [ -d /ucrt64/bin/data ]; then cp -r /ucrt64/bin/data "$stage/bin/"; fi
+          printf '[Paths]\nPlugins = plugins\nQmlImports = qml\n' > "$stage/bin/qt.conf"
+          makensis -DSTAGE="$(cygpath -w "$stage")" -DOUTPUT="$(cygpath -w "$RUNNER_TEMP/haruna-windows-x86_64-setup.exe")" .github/windows/installer.nsi
+      - name: Install and smoke test
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $bootstrap = Join-Path $env:RUNNER_TEMP 'CraftBootstrap.py'
-          Invoke-WebRequest https://raw.githubusercontent.com/KDE/craft/master/setup/CraftBootstrap.py -OutFile $bootstrap
-          # Craft's noninteractive Windows default is MSVC; Haruna's blueprint requires GCC.
-          $text = [IO.File]::ReadAllText($bootstrap)
-          $old = '("msvc2022", "cl"),'
-          if (-not $text.Contains($old)) { throw 'Craft bootstrap compiler default changed; review setup.' }
-          $text = $text.Replace($old, '(None, "gcc"),')
-          [IO.File]::WriteAllText($bootstrap, $text)
-          python $bootstrap --prefix C:/CraftRoot --use-defaults
-          if ($LASTEXITCODE -ne 0) { throw 'Craft bootstrap failed' }
-
-      - name: Build and package release commit
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $workspace = $env:GITHUB_WORKSPACE
-          $revision = (git -C $workspace rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve release commit' }
-          $settings = 'C:\CraftRoot\etc\CraftSettings.ini'
-          $text = [IO.File]::ReadAllText($settings)
-          $text = $text.Replace('#PackageType = SevenZipPackager', 'PackageType = NullsoftInstallerPackager')
-          $text = $text.Replace('PackageDebugSymbols = True', 'PackageDebugSymbols = False')
-          if (-not $text.Contains('PackageType = NullsoftInstallerPackager')) { throw 'Cannot configure NSIS packager' }
-          [IO.File]::WriteAllText($settings, $text)
-          # Craft clears the console on startup, but GitHub Actions has no console handle.
-          function Clear-Host { }
-          . C:\CraftRoot\craft\craftenv.ps1
-          $blueprints = @(Get-ChildItem C:\CraftRoot\etc\blueprints -Recurse -Filter haruna.py | Where-Object { $_.FullName -match 'kdemultimedia[\\/]haruna[\\/]haruna\.py$' })
-          if ($blueprints.Count -ne 1) { throw "Expected one Haruna blueprint, found $($blueprints.Count)" }
-          $blueprint = $blueprints[0].FullName
-          $text = [IO.File]::ReadAllText($blueprint)
-          $old = 'https://invent.kde.org/multimedia/haruna.git'
-          if (-not $text.Contains($old)) { throw 'Haruna blueprint source changed; review setup.' }
-          # Git clones the checkout and explicitly checks out its immutable commit.
-          $source = ([Uri]::new($workspace + '\')).AbsoluteUri.TrimEnd('/') + '||' + $revision
-          $text = $text.Replace($old, $source)
-          [IO.File]::WriteAllText($blueprint, $text)
-          craft --set version=master kde/kdemultimedia/haruna
-          if ($LASTEXITCODE -ne 0) { throw 'Setting Haruna target failed' }
-          craft nsis
-          if ($LASTEXITCODE -ne 0) { throw 'Installing NSIS failed' }
-          craft --use-cache --install-deps kde/kdemultimedia/haruna
-          if ($LASTEXITCODE -ne 0) { throw 'Installing Haruna dependencies failed' }
-          craft --no-cache kde/kdemultimedia/haruna
-          if ($LASTEXITCODE -ne 0) { throw 'Haruna build failed' }
-          craft --package kde/kdemultimedia/haruna
-          if ($LASTEXITCODE -ne 0) { throw 'Haruna packaging failed' }
-          $installers = @(Get-ChildItem C:\CraftRoot\tmp -Filter '*haruna*.exe' -File)
-          if ($installers.Count -ne 1) { throw "Expected one Haruna installer, found $($installers.Count)" }
-          Copy-Item $installers[0].FullName (Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-setup.exe')
+          $installDir = Join-Path $env:RUNNER_TEMP 'haruna-installed'
+          $installer = Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-setup.exe'
+          $setup = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installer failed: $($setup.ExitCode)" }
+          $env:HARUNA_LOG_FILE = Join-Path $env:RUNNER_TEMP 'haruna-startup.log'
+          $env:QML_IMPORT_TRACE = '1'
+          $env:QT_DEBUG_PLUGINS = '1'
+          $app = Start-Process -FilePath (Join-Path $installDir 'bin\haruna.exe') -WorkingDirectory (Join-Path $installDir 'bin') -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+              Start-Sleep -Seconds 1
+              $app.Refresh()
+              if ($app.HasExited) { throw "Haruna exited during startup: $($app.ExitCode)" }
+              if ($app.MainWindowHandle -ne [IntPtr]::Zero) { break }
+            } while ((Get-Date) -lt $deadline)
+            if ($app.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Haruna did not open its main window within 60 seconds' }
+          } finally {
+            if (Test-Path $env:HARUNA_LOG_FILE) { Get-Content $env:HARUNA_LOG_FILE }
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: haruna-windows-msys2-test
+          path: ${{ runner.temp }}/haruna-windows-x86_64-setup.exe
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload installer to published release
+        if: github.event_name == 'release'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

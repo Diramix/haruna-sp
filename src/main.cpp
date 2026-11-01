@@ -6,12 +6,17 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QFile>
 #include <QIcon>
+#include <QLoggingCategory>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QtEnvironmentVariables>
 
 #include <KLocalizedQmlContext>
 #include <KLocalizedString>
@@ -32,6 +37,17 @@ static const auto INITIAL_STYLE = QQuickStyle::name();
 
 int main(int argc, char *argv[])
 {
+    if (!qEnvironmentVariableIsEmpty("HARUNA_LOG_FILE")) {
+        qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &context, const QString &message) {
+            static QMutex mutex;
+            const QMutexLocker locker(&mutex);
+            QFile log(qEnvironmentVariable("HARUNA_LOG_FILE"));
+            if (log.open(QIODevice::WriteOnly | QIODevice::Append)) {
+                log.write(qFormatLogMessage(type, context, message).toUtf8());
+                log.write("\n");
+            }
+        });
+    }
 #ifdef QT_DEBUG
     QElapsedTimer timer;
     timer.start();
@@ -96,6 +112,9 @@ int main(int argc, char *argv[])
 
     engine.addImageProvider(u"thumbnail"_s, new ThumbnailImageProvider());
     engine.loadFromModule("org.kde.haruna", "Main");
+    if (engine.rootObjects().isEmpty()) {
+        return EXIT_FAILURE;
+    }
 
     application->setQmlEngine(&engine);
 
