@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: CC0-1.0
+name: Linux release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 180
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git github-cli cmake ninja extra-cmake-modules \
+            ffmpeg mpvqt kdsingleapplication kcolorscheme kconfig kcoreaddons kcrash kdeclarative \
+            kfilemetadata ki18n kiconthemes kio kirigami kitemmodels kservice kwindowsystem \
+            qqc2-desktop-style breeze-icons qt6-5compat qt6-base qt6-declarative qt6-websockets \
+            qt6-shadertools qt6-wayland patchelf curl fuse2
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Build Arch Linux package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^project(haruna VERSION \([^ ]*\).*/\1/p' CMakeLists.txt)
+          test -n "$version"
+          sed -i "s/^pkgver=.*/pkgver=$version/" .github/PKGBUILD
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -s /bin/bash -c 'cd "$GITHUB_WORKSPACE/.github" && makepkg --noconfirm'
+      - name: Build AppImage
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: bash appimage.sh
+      - name: Upload assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          packages=(.github/*.pkg.tar.zst)
+          test -f "${packages[0]}"
+          test -f Haruna-SharePlay-x86_64.AppImage
+          gh release upload "$RELEASE_TAG" "${packages[@]}" Haruna-SharePlay-x86_64.AppImage

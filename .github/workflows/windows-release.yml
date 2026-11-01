@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: None
+# SPDX-License-Identifier: CC0-1.0
+name: Windows release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bootstrap Craft (MinGW x86-64)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'CraftBootstrap.py'
+          Invoke-WebRequest https://raw.githubusercontent.com/KDE/craft/master/setup/CraftBootstrap.py -OutFile $bootstrap
+          # Craft's noninteractive Windows default is MSVC; Haruna's blueprint requires GCC.
+          $text = [IO.File]::ReadAllText($bootstrap)
+          $old = '("msvc2022", "cl"),'
+          if (-not $text.Contains($old)) { throw 'Craft bootstrap compiler default changed; review setup.' }
+          $text = $text.Replace($old, '(None, "gcc"),')
+          [IO.File]::WriteAllText($bootstrap, $text)
+          python $bootstrap --prefix C:/CraftRoot --use-defaults
+          if ($LASTEXITCODE -ne 0) { throw 'Craft bootstrap failed' }
+
+      - name: Build and package release commit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workspace = $env:GITHUB_WORKSPACE
+          $revision = (git -C $workspace rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') { throw 'Cannot resolve release commit' }
+          $settings = 'C:\CraftRoot\etc\CraftSettings.ini'
+          $text = [IO.File]::ReadAllText($settings)
+          $text = $text.Replace('#PackageType = SevenZipPackager', 'PackageType = NullsoftInstallerPackager')
+          $text = $text.Replace('PackageDebugSymbols = True', 'PackageDebugSymbols = False')
+          if (-not $text.Contains('PackageType = NullsoftInstallerPackager')) { throw 'Cannot configure NSIS packager' }
+          [IO.File]::WriteAllText($settings, $text)
+          . C:\CraftRoot\craft\craftenv.ps1
+          $blueprints = @(Get-ChildItem C:\CraftRoot\etc\blueprints -Recurse -Filter haruna.py | Where-Object { $_.FullName -match 'kdemultimedia[\\/]haruna[\\/]haruna\.py$' })
+          if ($blueprints.Count -ne 1) { throw "Expected one Haruna blueprint, found $($blueprints.Count)" }
+          $blueprint = $blueprints[0].FullName
+          $text = [IO.File]::ReadAllText($blueprint)
+          $old = 'https://invent.kde.org/multimedia/haruna.git'
+          if (-not $text.Contains($old)) { throw 'Haruna blueprint source changed; review setup.' }
+          # Git clones the checkout and explicitly checks out its immutable commit.
+          $source = ([Uri]::new($workspace + '\')).AbsoluteUri.TrimEnd('/') + '||' + $revision
+          $text = $text.Replace($old, $source)
+          [IO.File]::WriteAllText($blueprint, $text)
+          craft --set version=master kde/kdemultimedia/haruna
+          if ($LASTEXITCODE -ne 0) { throw 'Setting Haruna target failed' }
+          craft nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Installing NSIS failed' }
+          craft --no-cache kde/kdemultimedia/haruna
+          if ($LASTEXITCODE -ne 0) { throw 'Haruna build failed' }
+          craft --package kde/kdemultimedia/haruna
+          if ($LASTEXITCODE -ne 0) { throw 'Haruna packaging failed' }
+          $installers = @(Get-ChildItem C:\CraftRoot\tmp -Filter '*haruna*.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected one Haruna installer, found $($installers.Count)" }
+          Copy-Item $installers[0].FullName (Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-setup.exe')
+
+      - name: Upload installer to published release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "$env:RELEASE_TAG" (Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-setup.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
