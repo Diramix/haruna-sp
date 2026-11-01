@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: CC0-1.0
+pkgname=haruna-shareplay
+pkgver=1.9.0
+pkgrel=1
+pkgdesc='Haruna video player with SharePlay'
+arch=('x86_64')
+url='https://apps.kde.org/haruna/'
+license=('GPL-3.0-or-later')
+depends=('ffmpeg' 'glibc' 'hicolor-icon-theme' 'kcolorscheme' 'kconfig' 'kcoreaddons'
+         'kcrash' 'kdeclarative' 'kdsingleapplication' 'kfilemetadata' 'ki18n'
+         'kiconthemes' 'kio' 'kirigami' 'kitemmodels' 'kservice' 'kwindowsystem'
+         'libstdc++' 'mpvqt' 'qqc2-desktop-style' 'qt6-5compat' 'qt6-base'
+         'qt6-declarative' 'qt6-websockets')
+makedepends=('cmake' 'extra-cmake-modules' 'ninja' 'qt6-shadertools')
+optdepends=('yt-dlp: online video support')
+conflicts=('haruna')
+
+build() {
+    cmake -S "$startdir/.." -B "$srcdir/build" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+    cmake --build "$srcdir/build"
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install "$srcdir/build"
+}
