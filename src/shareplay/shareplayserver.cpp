@@ -12,8 +12,11 @@
 #include <QJsonDocument>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
+
 #include <QWebSocket>
 #include <QWebSocketServer>
+#include <cmath>
 
 using namespace Qt::StringLiterals;
 
@@ -40,11 +43,10 @@ void SharePlayServer::setMediaServer(SharePlayMediaServer *mediaServer)
 
 bool SharePlayServer::start(quint16 port)
 {
-    if (m_listener->isListening()) {
-        stop();
-    }
+    stop();
     m_clock.start();
-    return m_listener->listen(QHostAddress::Any, port);
+    m_running = m_listener->listen(QHostAddress::Any, port);
+    return m_running;
 }
 
 double SharePlayServer::hostTime() const
@@ -54,15 +56,41 @@ double SharePlayServer::hostTime() const
 
 void SharePlayServer::stop()
 {
-    const auto peers = m_peers.keys();
-    for (QWebSocket *peer : peers) {
-        peer->close(QWebSocketProtocol::CloseCodeGoingAway);
+    m_running = false;
+    ++m_session;
+    m_listener->close();
+    m_peers.clear();
+    const auto webSockets = m_webSockets;
+    m_webSockets.clear();
+    for (QWebSocket *peer : webSockets) {
+        peer->abort();
         peer->deleteLater();
     }
-    m_peers.clear();
-    if (m_listener->isListening()) {
-        m_listener->close();
+    const auto tcpSockets = m_tcpSockets;
+    m_tcpSockets.clear();
+    for (const QPointer<QTcpSocket> &socket : tcpSockets) {
+        if (socket) {
+            socket->abort();
+            if (socket) {
+                socket->deleteLater();
+            }
+        }
     }
+    while (QWebSocket *peer = m_server->nextPendingConnection()) {
+        peer->abort();
+        peer->deleteLater();
+    }
+    if (m_mediaServer) {
+        m_mediaServer->stop();
+    }
+    m_mediaName.clear();
+    m_mediaAvailable = false;
+    m_mediaDuration = 0.0;
+    m_mediaToken = 0;
+    m_lastPosition = 0.0;
+    m_lastStateTime = 0.0;
+    m_lastPaused = true;
+    m_seq = 0;
     Q_EMIT peersChanged();
 }
 
@@ -78,7 +106,30 @@ QString SharePlayServer::errorString() const
 
 void SharePlayServer::onTcpConnection()
 {
+    // WebSocket handoff may disconnect the original socket's signals; guarded
+    // entries still expire, and are pruned before accepting more connections.
+    for (auto it = m_tcpSockets.begin(); it != m_tcpSockets.end();) {
+        if (it.value().isNull()) {
+            it = m_tcpSockets.erase(it);
+        } else {
+            ++it;
+        }
+    }
     while (QTcpSocket *socket = m_listener->nextPendingConnection()) {
+        if (!m_running) {
+            socket->abort();
+            socket->deleteLater();
+            continue;
+        }
+        m_tcpSockets.insert(socket, socket);
+        connect(socket, &QObject::destroyed, this, [this, socket]() {
+            m_tcpSockets.remove(socket);
+        });
+        auto *deadline = new QTimer(socket);
+        deadline->setObjectName(u"shareplayHeaderDeadline"_s);
+        deadline->setSingleShot(true);
+        connect(deadline, &QTimer::timeout, socket, &QTcpSocket::abort);
+        deadline->start(15000);
         connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
         connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
             dispatch(socket);
@@ -88,6 +139,10 @@ void SharePlayServer::onTcpConnection()
 
 void SharePlayServer::dispatch(QTcpSocket *socket)
 {
+    if (!m_running || !m_tcpSockets.contains(socket)) {
+        socket->abort();
+        return;
+    }
     const QByteArray peeked = socket->peek(16 * 1024);
     const int headerEnd = peeked.indexOf("\r\n\r\n");
     if (headerEnd < 0) {
@@ -100,6 +155,9 @@ void SharePlayServer::dispatch(QTcpSocket *socket)
 
     // the request is complete, this socket is now owned by whoever handles it
     disconnect(socket, &QTcpSocket::readyRead, this, nullptr);
+    if (auto *deadline = socket->findChild<QTimer *>(u"shareplayHeaderDeadline"_s)) {
+        deadline->stop();
+    }
     const QByteArray header = peeked.left(headerEnd);
 
     if (isWebSocketUpgrade(header)) {
@@ -129,8 +187,17 @@ void SharePlayServer::setPassword(const QString &password)
 
 void SharePlayServer::setMedia(const QString &name, double duration, bool available, quint64 token)
 {
+    const bool changed = token != m_mediaToken || available != m_mediaAvailable;
+    if (changed) {
+        m_lastPosition = 0.0;
+        m_lastStateTime = hostTime();
+        m_lastPaused = true;
+    }
+    if (m_mediaServer) {
+        m_mediaServer->setToken(token);
+    }
     m_mediaName = name;
-    m_mediaDuration = duration;
+    m_mediaDuration = std::isfinite(duration) && duration >= 0.0 ? duration : 0.0;
     m_mediaToken = token;
     m_mediaAvailable = available;
     for (auto it = m_peers.cbegin(); it != m_peers.cend(); ++it) {
@@ -149,7 +216,7 @@ QJsonObject SharePlayServer::mediaMessageFor(QWebSocket *peer) const
         const QString host = isIPv4 ? QHostAddress(ipv4).toString() : u"[%1]"_s.arg(address.toString());
         // the token makes the url change whenever the host plays a different file,
         // otherwise the clients can't tell the new stream from the previous one
-        mediaUrl = u"http://%1:%2/media?v=%3"_s.arg(host, QString::number(SharePlayProtocol::ControlPort), QString::number(m_mediaToken));
+        mediaUrl = u"http://%1:%2/media?v=%3"_s.arg(host, QString::number(peer->localPort()), QString::number(m_mediaToken));
     }
 
     return QJsonObject{
@@ -162,6 +229,9 @@ QJsonObject SharePlayServer::mediaMessageFor(QWebSocket *peer) const
 
 void SharePlayServer::broadcastState(double position, bool paused)
 {
+    if (!m_running || !std::isfinite(position) || position < 0.0) {
+        return;
+    }
     m_lastPosition = position;
     m_lastPaused = paused;
     // the position is only meaningful together with the instant it was sampled at
@@ -206,8 +276,22 @@ void SharePlayServer::broadcast(const QJsonObject &message)
 void SharePlayServer::onNewConnection()
 {
     while (QWebSocket *peer = m_server->nextPendingConnection()) {
-        connect(peer, &QWebSocket::textMessageReceived, this, [this, peer](const QString &message) {
-            onTextMessage(peer, message);
+        if (!m_running) {
+            peer->abort();
+            peer->deleteLater();
+            continue;
+        }
+        m_webSockets.insert(peer);
+        const quint64 session = m_session;
+        connect(peer, &QWebSocket::textMessageReceived, this, [this, peer, session](const QString &message) {
+            if (m_running && session == m_session && m_webSockets.contains(peer)) {
+                onTextMessage(peer, message);
+            }
+        });
+        QTimer::singleShot(15000, peer, [this, peer, session]() {
+            if (session == m_session && !m_peers.contains(peer)) {
+                peer->abort();
+            }
         });
         connect(peer, &QWebSocket::disconnected, this, [this, peer]() {
             removePeer(peer);
@@ -259,6 +343,9 @@ void SharePlayServer::onTextMessage(QWebSocket *peer, const QString &message)
     }
 
     if (type == SharePlayProtocol::Type::RequestPause) {
+        if (!object.value(u"paused"_s).isBool()) {
+            return;
+        }
         Q_EMIT pauseRequested(m_peers.value(peer), object.value(u"paused"_s).toBool(), peer);
         return;
     }
@@ -278,6 +365,7 @@ void SharePlayServer::onTextMessage(QWebSocket *peer, const QString &message)
 
 void SharePlayServer::removePeer(QWebSocket *peer)
 {
+    m_webSockets.remove(peer);
     const bool wasKnown = m_peers.remove(peer) > 0;
     peer->deleteLater();
     if (wasKnown) {

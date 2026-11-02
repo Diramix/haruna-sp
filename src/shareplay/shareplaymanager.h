@@ -83,6 +83,7 @@ public:
 
     /** host side: the file currently playing, shared with the clients */
     Q_INVOKABLE void setHostMedia(const QUrl &fileUrl, const QString &title, double duration);
+    Q_INVOKABLE void updateHostMediaMetadata(const QUrl &fileUrl, const QString &title, double duration);
     /** host side: called on every position/pause change */
     Q_INVOKABLE void publishState(double position, bool paused);
 
@@ -114,6 +115,7 @@ Q_SIGNALS:
     void applySpeed(double speed);
     /** client side: the host media became available at this url */
     void mediaAvailable(const QUrl &url, const QString &title);
+    void mediaUnavailable();
     /** show a message in the osd */
     void notice(const QString &text);
     void peerRequestedPause(const QString &name, bool paused);
@@ -148,6 +150,7 @@ private:
     QElapsedTimer m_seekClock;
     bool m_lastPaused{true};
     bool m_streamMedia{true};
+    bool m_mediaUnavailable{false};
     QUrl m_hostMediaUrl;
     quint64 m_mediaToken{0};
 };

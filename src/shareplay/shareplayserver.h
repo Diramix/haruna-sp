@@ -11,6 +11,8 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QObject>
+#include <QPointer>
+#include <QSet>
 #include <QStringList>
 #include <QUrl>
 
@@ -67,6 +69,10 @@ private:
     SharePlayMediaServer *m_mediaServer{nullptr};
     QElapsedTimer m_clock;
     QHash<QWebSocket *, QString> m_peers;
+    QHash<QTcpSocket *, QPointer<QTcpSocket>> m_tcpSockets;
+    QSet<QWebSocket *> m_webSockets;
+    quint64 m_session{0};
+    bool m_running{false};
     QString m_password;
     QString m_mediaName;
     double m_mediaDuration{0.0};
