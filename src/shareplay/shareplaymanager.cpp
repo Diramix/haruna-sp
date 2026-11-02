@@ -11,6 +11,7 @@
 #include "shareplayserver.h"
 
 #include <QNetworkInterface>
+#include <QRandomGenerator>
 
 #include <KLocalizedString>
 
@@ -32,6 +33,17 @@ SharePlayManager::SharePlayManager(QObject *parent)
     , m_mediaServer(new SharePlayMediaServer(this))
     , m_client(new SharePlayClient(this))
 {
+    m_mediaToken = QRandomGenerator::global()->generate64();
+    m_server->setMediaServer(m_mediaServer);
+    connect(m_mediaServer, &SharePlayMediaServer::fileInvalidated, this, [this]() {
+        if (m_mode != Mode::Host) {
+            return;
+        }
+        ++m_mediaToken;
+        m_server->setMedia(m_mediaTitle, 0.0, false, m_mediaToken);
+        Q_EMIT errorOccurred(i18nc("@info", "The shared file changed or became unavailable. Select the file again to share it."));
+    });
+
     connect(m_server, &SharePlayServer::peersChanged, this, [this]() {
         m_peers = m_server->peerNames();
         Q_EMIT peersChanged();
@@ -83,16 +95,28 @@ SharePlayManager::SharePlayManager(QObject *parent)
     connect(m_client, &SharePlayClient::noticeReceived, this, &SharePlayManager::notice);
 
     connect(m_client, &SharePlayClient::mediaReceived, this, [this](const QUrl &url, const QString &title, double) {
+        const bool wasStreaming = !m_mediaUrl.isEmpty();
+        m_seekClock.invalidate();
+        setDrift(0.0);
         setMediaTitle(title);
         if (url.isValid() && !url.isEmpty()) {
+            m_mediaUnavailable = false;
             setMediaUrl(url);
             Q_EMIT mediaAvailable(url, title);
         } else {
             setMediaUrl(QUrl());
+            if (wasStreaming) {
+                m_mediaUnavailable = true;
+                Q_EMIT mediaUnavailable();
+                Q_EMIT notice(i18nc("@info", "The shared media is no longer available"));
+            }
         }
     });
 
     connect(m_client, &SharePlayClient::stateReceived, this, [this](double, bool paused) {
+        if (m_mediaUnavailable) {
+            return;
+        }
         Q_EMIT applyPause(paused);
         // react to a seek by the host right away instead of waiting for the next tick
         evaluateSync();
@@ -163,11 +187,6 @@ int SharePlayManager::controlPort() const
     return SharePlayProtocol::ControlPort;
 }
 
-int SharePlayManager::mediaPort() const
-{
-    return SharePlayProtocol::MediaPort;
-}
-
 double SharePlayManager::drift() const
 {
     return m_drift;
@@ -181,7 +200,7 @@ void SharePlayManager::reportPosition(double position)
 
 void SharePlayManager::evaluateSync()
 {
-    if (m_mode != Mode::Client || !m_client->hasHostState()) {
+    if (m_mode != Mode::Client || m_mediaUnavailable || !m_client->hasHostState()) {
         return;
     }
 
@@ -248,14 +267,11 @@ bool SharePlayManager::startHost(const QString &password, bool streamMedia)
     m_server->setPassword(password);
     if (!m_server->start(SharePlayProtocol::ControlPort)) {
         const QString message = i18nc("@info", "Could not start the server: %1", m_server->errorString());
+        setMode(Mode::Off);
+        setState(State::Disconnected);
         setStatusText(message);
         Q_EMIT errorOccurred(message);
         return false;
-    }
-
-    if (m_streamMedia && !m_mediaServer->start(SharePlayProtocol::MediaPort)) {
-        m_streamMedia = false;
-        Q_EMIT errorOccurred(i18nc("@info, %1 is a port number", "Could not start the media server on port %1", QString::number(SharePlayProtocol::MediaPort)));
     }
 
     setMode(Mode::Host);
@@ -297,19 +313,27 @@ void SharePlayManager::setHostMedia(const QUrl &fileUrl, const QString &title, d
         return;
     }
 
-    // a new file gets a new token, so its url differs from the previous one and
-    // the clients actually reload instead of assuming nothing changed
-    if (fileUrl != m_hostMediaUrl) {
-        m_hostMediaUrl = fileUrl;
+    const quint64 previousRevision = m_mediaServer->revision();
+    const bool canStream = m_streamMedia && fileUrl.isLocalFile() && m_server->isListening();
+    m_mediaServer->setFile(canStream ? fileUrl.toLocalFile() : QString());
+    // Metadata-only notifications keep the stream; a new snapshot, even at the
+    // same path, gets a different generation. Tokens are not access credentials.
+    if (fileUrl != m_hostMediaUrl || previousRevision != m_mediaServer->revision()) {
         ++m_mediaToken;
     }
-
-    const bool isLocal = fileUrl.isLocalFile();
-    const bool canStream = m_streamMedia && isLocal && m_mediaServer->isListening();
-    m_mediaServer->setFile(canStream ? fileUrl.toLocalFile() : QString());
-
+    m_hostMediaUrl = fileUrl;
     setMediaTitle(title);
-    m_server->setMedia(title, duration, canStream, m_mediaToken);
+    m_server->setMedia(title, duration, canStream && !m_mediaServer->file().isEmpty(), m_mediaToken);
+}
+
+void SharePlayManager::updateHostMediaMetadata(const QUrl &fileUrl, const QString &title, double duration)
+{
+    if (m_mode != Mode::Host || fileUrl != m_hostMediaUrl) {
+        return;
+    }
+    // Metadata from an open inode must not re-adopt a replacement on disk.
+    setMediaTitle(title);
+    m_server->setMedia(title, duration, !m_mediaServer->file().isEmpty(), m_mediaToken);
 }
 
 void SharePlayManager::publishState(double position, bool paused)
@@ -395,9 +419,9 @@ void SharePlayManager::teardown()
     setDrift(0.0);
     m_client->disconnectFromServer();
     m_server->stop();
-    m_mediaServer->stop();
     m_mediaServer->setFile(QString());
     m_hostMediaUrl.clear();
+    m_mediaUnavailable = false;
     setMediaTitle(QString());
     setMediaUrl(QUrl());
     if (!m_peers.isEmpty()) {

@@ -51,6 +51,8 @@ Q_SIGNALS:
 
 private:
     void onConnected();
+    void finish(const QString &message = QString(), bool rejectedByHost = false);
+    bool validMediaUrl(const QUrl &url) const;
     void onTextMessage(const QString &message);
     void send(const QJsonObject &message);
     void sendPing();
@@ -60,6 +62,11 @@ private:
 
     QWebSocket *m_socket{nullptr};
     QTimer *m_pingTimer{nullptr};
+    QTimer *m_timeoutTimer{nullptr};
+    QUrl m_controlUrl;
+
+    bool m_active{false};
+    quint64 m_attempt{0};
     QElapsedTimer m_clock;
     QString m_name;
     QString m_password;

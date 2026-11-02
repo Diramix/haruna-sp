@@ -597,6 +597,10 @@ ApplicationWindow {
             mpv.setPlaybackSpeed(speed)
         }
 
+        onMediaUnavailable: {
+            mpv.commandAsync(["stop"])
+        }
+
         onMediaAvailable: function(url, title) {
             if (mpv.currentUrl.toString() === url.toString()) {
                 return
@@ -665,11 +669,14 @@ ApplicationWindow {
         function onCurrentUrlChanged() {
             sharePlay.setHostMedia(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
         }
-        function onMediaTitleChanged() {
+        function onFileStarted() {
             sharePlay.setHostMedia(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
         }
+        function onMediaTitleChanged() {
+            sharePlay.updateHostMediaMetadata(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
+        }
         function onDurationChanged() {
-            sharePlay.setHostMedia(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
+            sharePlay.updateHostMediaMetadata(mpv.currentUrl, mpv.mediaTitle, mpv.duration)
         }
     }
 
