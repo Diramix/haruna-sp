@@ -95,6 +95,7 @@ jobs:
             mingw-w64-ucrt-x86_64-kiconthemes
             mingw-w64-ucrt-x86_64-kio
             mingw-w64-ucrt-x86_64-kirigami
+            mingw-w64-ucrt-x86_64-kitemmodels
             mingw-w64-ucrt-x86_64-kwindowsystem
             mingw-w64-ucrt-x86_64-qqc2-desktop-style
             mingw-w64-ucrt-x86_64-breeze-icons
@@ -102,7 +103,7 @@ jobs:
             mingw-w64-ucrt-x86_64-qt6-declarative
             mingw-w64-ucrt-x86_64-qt6-websockets
             mingw-w64-ucrt-x86_64-qt6-shadertools
-            mingw-w64-ucrt-x86_64-nsis
+
       - name: Build MpvQt
         run: |
           set -euo pipefail
@@ -116,24 +117,28 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/haruna-stage" -DBUILD_TESTING=OFF
           cmake --build build --parallel
           cmake --install build
-      - name: Package installer
+      - name: Prepare portable build
         run: |
           set -euo pipefail
           stage="$RUNNER_TEMP/haruna-stage"
           cp /ucrt64/bin/*.dll "$stage/bin/"
           cp -r /ucrt64/share/qt6/plugins "$stage/bin/"
           cp -r /ucrt64/share/qt6/qml "$stage/bin/"
+          test -f "$stage/bin/qml/org/kde/kitemmodels/qmldir"
           if [ -d /ucrt64/bin/data ]; then cp -r /ucrt64/bin/data "$stage/bin/"; fi
           printf '[Paths]\nPlugins = plugins\nQmlImports = qml\n' > "$stage/bin/qt.conf"
-          makensis -DSTAGE="$(cygpath -w "$stage")" -DOUTPUT="$(cygpath -w "$RUNNER_TEMP/haruna-windows-x86_64-setup.exe")" .github/windows/installer.nsi
-      - name: Install and smoke test
+      - name: Archive portable build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installDir = Join-Path $env:RUNNER_TEMP 'haruna-installed'
-          $installer = Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-setup.exe'
-          $setup = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
-          if ($setup.ExitCode -ne 0) { throw "Installer failed: $($setup.ExitCode)" }
+          Compress-Archive -Path (Join-Path $env:RUNNER_TEMP 'haruna-stage\*') -DestinationPath (Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-portable.zip')
+      - name: Extract and smoke test portable build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installDir = Join-Path $env:RUNNER_TEMP 'haruna-portable-test'
+          $archive = Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-portable.zip'
+          Expand-Archive -Path $archive -DestinationPath $installDir
           $env:HARUNA_LOG_FILE = Join-Path $env:RUNNER_TEMP 'haruna-startup.log'
           $env:QML_IMPORT_TRACE = '1'
           $env:QT_DEBUG_PLUGINS = '1'
@@ -154,12 +159,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch'
         with:
-          name: haruna-windows-msys2-test
-          path: ${{ runner.temp }}/haruna-windows-x86_64-setup.exe
+          name: haruna-windows-portable-test
+          path: ${{ runner.temp }}/haruna-windows-x86_64-portable.zip
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload installer to published release
+      - name: Upload portable build to published release
         if: github.event_name == 'release'
         shell: pwsh
         env:
@@ -167,5 +172,5 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release upload "$env:RELEASE_TAG" (Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-setup.exe')
+          gh release upload "$env:RELEASE_TAG" (Join-Path $env:RUNNER_TEMP 'haruna-windows-x86_64-portable.zip')
           if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
