@@ -13,6 +13,8 @@ qt_add_qml_module(shareplay
     QML_FILES
         SharePlayConfigWindow.qml
     SOURCES
+        shareplaytls.h
+        shareplaytls.cpp
         shareplayprotocol.h
         shareplayclient.h
         shareplayclient.cpp
@@ -28,6 +30,7 @@ target_link_libraries(shareplay PRIVATE
     Qt6::Core
     Qt6::Network
     Qt6::WebSockets
+    OpenSSL::Crypto
 
     KF6::I18n
 

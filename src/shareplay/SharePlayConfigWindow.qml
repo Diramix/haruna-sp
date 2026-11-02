@@ -41,6 +41,20 @@ Loader {
     active: false
     asynchronous: true
 
+    Connections {
+        target: root.m_sharePlay
+        function onInsecureConfirmationPendingChanged() : void {
+            if (root.m_sharePlay.insecureConfirmationPending && !root.active) {
+                root.open()
+            }
+        }
+        function onPendingFingerprintChanged() : void {
+            if (root.m_sharePlay.pendingFingerprint !== "" && !root.active) {
+                root.open()
+            }
+        }
+    }
+
     sourceComponent: Kirigami.ApplicationWindow {
         id: window
 
@@ -65,6 +79,76 @@ Loader {
         title: KI18n.i18nc("@title:window", "SharePlay")
         transientParent: null
         visible: false
+
+        Component.onCompleted: {
+            if (sharePlay.insecureConfirmationPending) {
+                visible = true
+                insecureDialog.open()
+            } else if (sharePlay.pendingFingerprint !== "") {
+                visible = true
+                fingerprintDialog.open()
+            }
+        }
+
+        Connections {
+            target: window.sharePlay
+            function onPendingFingerprintChanged() : void {
+                if (window.sharePlay.pendingFingerprint !== "") {
+                    window.visible = true
+                    fingerprintDialog.open()
+                } else {
+                    fingerprintDialog.close()
+                }
+            }
+            function onInsecureConfirmationPendingChanged() : void {
+                if (window.sharePlay.insecureConfirmationPending) {
+                    window.visible = true
+                    insecureDialog.open()
+                } else {
+                    insecureDialog.close()
+                }
+            }
+        }
+
+        QQC2.Dialog {
+            id: fingerprintDialog
+            anchors.centerIn: parent
+            modal: true
+            title: KI18n.i18nc("@title:window", "Confirm host certificate")
+            standardButtons: QQC2.Dialog.Ok | QQC2.Dialog.Cancel
+            onAccepted: window.sharePlay.confirmFingerprint()
+            onRejected: window.sharePlay.cancelFingerprint()
+
+            contentItem: ColumnLayout {
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: KI18n.i18nc("@info", "Compare this SHA-256 fingerprint with the host using a trusted channel before connecting.")
+                }
+                QQC2.TextField {
+                    Layout.fillWidth: true
+                    readOnly: true
+                    selectByMouse: true
+                    text: window.sharePlay.pendingFingerprint
+                }
+            }
+        }
+
+        QQC2.Dialog {
+            id: insecureDialog
+            anchors.centerIn: parent
+            modal: true
+            title: KI18n.i18nc("@title:window", "Unencrypted connection")
+            standardButtons: QQC2.Dialog.Yes | QQC2.Dialog.Cancel
+            onAccepted: window.sharePlay.confirmInsecureConnection()
+            onRejected: window.sharePlay.cancelInsecureConnection()
+
+            contentItem: QQC2.Label {
+                width: Math.min(window.width - Kirigami.Units.gridUnit * 4, Kirigami.Units.gridUnit * 25)
+                wrapMode: Text.WordWrap
+                text: KI18n.i18nc("@info", "The server accepted an unencrypted connection. Its identity cannot be verified, and your password, playback controls and media will not be encrypted. Connect anyway?")
+            }
+        }
 
         Shortcut {
             sequence: "Esc"
@@ -97,6 +181,21 @@ Loader {
                     implicitHeight: implicitWidth
                     radius: width / 2
                     color: window.accentColor
+                    visible: !(window.sharePlay.state === SharePlayManager.State.Connected && window.sharePlay.insecureConnection)
+                }
+
+                Kirigami.Icon {
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.rightMargin: Kirigami.Units.smallSpacing
+                    implicitWidth: Kirigami.Units.iconSizes.small
+                    implicitHeight: implicitWidth
+                    source: "dialog-warning-symbolic"
+                    color: Kirigami.Theme.positiveTextColor
+                    visible: window.sharePlay.state === SharePlayManager.State.Connected && window.sharePlay.insecureConnection
+                    QQC2.ToolTip.visible: warningHover.hovered
+                    QQC2.ToolTip.text: KI18n.i18nc("@info:tooltip", "This connection is not encrypted")
+
+                    HoverHandler { id: warningHover }
                 }
 
                 QQC2.Label {
@@ -118,8 +217,45 @@ Loader {
                 }
 
                 QQC2.Label {
+                    id: hostFingerprintField
                     Layout.alignment: Qt.AlignVCenter
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    visible: window.sharePlay.hostFingerprint !== ""
+                    text: window.sharePlay.hostFingerprint
+                    elide: Text.ElideMiddle
+                    horizontalAlignment: Text.AlignHCenter
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.Button
+                    Accessible.name: KI18n.i18nc("@action:button", "Copy host certificate fingerprint")
+                    Accessible.onPressAction: copyFingerprint()
+                    QQC2.ToolTip.visible: fingerprintHover.hovered
+                    QQC2.ToolTip.text: KI18n.i18nc("@info:tooltip", "Click to copy the host certificate fingerprint")
+
+                    function copyFingerprint() : void {
+                        fingerprintClipboard.selectAll()
+                        fingerprintClipboard.copy()
+                        window.sharePlay.notice(KI18n.i18nc("@info", "Fingerprint copied"))
+                    }
+
+                    TextInput {
+                        id: fingerprintClipboard
+                        visible: false
+                        text: window.sharePlay.hostFingerprint
+                    }
+                    Keys.onReturnPressed: copyFingerprint()
+                    Keys.onSpacePressed: copyFingerprint()
+                    TapHandler { onTapped: hostFingerprintField.copyFingerprint() }
+                    HoverHandler {
+                        id: fingerprintHover
+                        cursorShape: Qt.PointingHandCursor
+                    }
+                }
+
+                QQC2.Label {
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.fillWidth: true
+                    visible: !hostFingerprintField.visible
                     elide: Text.ElideMiddle
                     opacity: 0.75
                     text: window.sharePlay.mediaTitle !== "" ? `— ${window.sharePlay.mediaTitle}` : ""
@@ -238,6 +374,15 @@ Loader {
                                 enabled: window.isIdle
                                 checked: SharePlaySettings.streamMedia
                             }
+
+                            QQC2.CheckBox {
+                                id: hostAllowInsecure
+
+                                Kirigami.FormData.label: KI18n.i18nc("@label:checkbox", "Security:")
+                                text: KI18n.i18nc("@option:check", "Allow insecure")
+                                enabled: window.isIdle
+                                checked: false
+                            }
                         }
 
                         QQC2.Button {
@@ -257,9 +402,10 @@ Loader {
                                 SharePlaySettings.streamMedia = hostStream.checked
                                 SharePlaySettings.save()
 
-                                window.sharePlay.startHost(hostPassword.text, hostStream.checked)
+                                window.sharePlay.startHost(hostPassword.text, hostStream.checked, hostAllowInsecure.checked)
                             }
                         }
+
 
                         Kirigami.Separator { Layout.fillWidth: true }
 
@@ -345,6 +491,7 @@ Loader {
                                 placeholderText: KI18n.i18nc("@info:placeholder", "Shown to the other viewers")
                                 onAccepted: connectButton.clicked()
                             }
+
 
                             Kirigami.PasswordField {
                                 id: clientPassword

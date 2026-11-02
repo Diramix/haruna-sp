@@ -13,6 +13,7 @@
 #include <QUrl>
 #include <qqmlintegration.h>
 
+class QWebSocket;
 class SharePlayClient;
 class SharePlayMediaServer;
 class SharePlayServer;
@@ -52,6 +53,12 @@ public:
     Q_PROPERTY(bool isHost READ isHost NOTIFY modeChanged)
     bool isHost() const;
 
+    Q_PROPERTY(bool insecureConnection READ insecureConnection NOTIFY insecureConnectionChanged)
+    bool insecureConnection() const
+    {
+        return m_insecureConnection;
+    }
+
     /** false only for a connected client: playback is driven by the host */
     Q_PROPERTY(bool canControl READ canControl NOTIFY modeChanged)
     bool canControl() const;
@@ -77,11 +84,30 @@ public:
     Q_PROPERTY(int controlPort READ controlPort CONSTANT)
     int controlPort() const;
 
-    Q_PROPERTY(int mediaPort READ mediaPort CONSTANT)
-    int mediaPort() const;
+    Q_INVOKABLE bool startHost(const QString &password, bool streamMedia, bool allowInsecure);
+    Q_PROPERTY(QString hostFingerprint READ hostFingerprint NOTIFY hostFingerprintChanged)
+    QString hostFingerprint() const
+    {
+        return m_hostFingerprint;
+    }
 
-    Q_INVOKABLE bool startHost(const QString &password, bool streamMedia);
+    Q_PROPERTY(QString pendingFingerprint READ pendingFingerprint NOTIFY pendingFingerprintChanged)
+    QString pendingFingerprint() const
+    {
+        return m_pendingFingerprint;
+    }
+
     Q_INVOKABLE void connectToHost(const QString &address, const QString &nickname, const QString &password);
+    Q_PROPERTY(bool insecureConfirmationPending READ insecureConfirmationPending NOTIFY insecureConfirmationPendingChanged)
+    bool insecureConfirmationPending() const
+    {
+        return m_insecureConfirmationPending;
+    }
+
+    Q_INVOKABLE void confirmInsecureConnection();
+    Q_INVOKABLE void cancelInsecureConnection();
+    Q_INVOKABLE void confirmFingerprint();
+    Q_INVOKABLE void cancelFingerprint();
     Q_INVOKABLE void leave();
 
     /** host side: the file currently playing, shared with the clients */
@@ -103,6 +129,10 @@ public:
 
 Q_SIGNALS:
     void modeChanged();
+    void insecureConnectionChanged();
+    void hostFingerprintChanged();
+    void pendingFingerprintChanged();
+    void insecureConfirmationPendingChanged();
     void stateChanged();
     void peersChanged();
     void statusTextChanged();
@@ -134,6 +164,8 @@ private:
     void setSpeedFactor(double speed);
     void evaluateSync();
     void teardown();
+    void startInsecureProbe();
+    void closeInsecureProbe();
 
     SharePlayServer *m_server{nullptr};
     SharePlayMediaServer *m_mediaServer{nullptr};
@@ -146,6 +178,16 @@ private:
     QString m_mediaTitle;
     QUrl m_mediaUrl;
     QString m_nickname;
+    QString m_hostFingerprint;
+    QString m_pendingFingerprint;
+    QString m_pendingPassword;
+    QUrl m_pendingUrl;
+    QWebSocket *m_insecureProbe{nullptr};
+    quint64 m_connectionGeneration{0};
+    bool m_initialSecureAttempt{false};
+    bool m_insecureConfirmationPending{false};
+    bool m_ignoreInitialError{false};
+
     double m_syncThreshold{0.8};
     double m_lastPosition{0.0};
     double m_drift{0.0};
@@ -153,6 +195,7 @@ private:
     QElapsedTimer m_seekClock;
     bool m_lastPaused{true};
     bool m_streamMedia{true};
+    bool m_insecureConnection{false};
     bool m_mediaUnavailable{false};
     QUrl m_hostMediaUrl;
     quint64 m_mediaToken{0};

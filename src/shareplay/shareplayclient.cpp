@@ -9,9 +9,14 @@
 
 #include <cmath>
 
+#include <QCryptographicHash>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
+#include <QSslCertificate>
+#include <QSslConfiguration>
+#include <QSslError>
 #include <QTimer>
 #include <QWebSocket>
 
@@ -114,7 +119,7 @@ SharePlayClient::~SharePlayClient()
     disconnectFromServer();
 }
 
-void SharePlayClient::connectToServer(const QUrl &url, const QString &name, const QString &password)
+void SharePlayClient::connectToServer(const QUrl &url, const QString &name, const QString &password, const QByteArray &confirmedSha256)
 {
     disconnectFromServer();
     ++m_attempt;
@@ -132,9 +137,25 @@ void SharePlayClient::connectToServer(const QUrl &url, const QString &name, cons
     m_hostPaused = true;
     m_pingTimer->setInterval(FastPingIntervalMs);
     m_controlUrl = url;
+    m_confirmedSha256 = confirmedSha256.toLower();
+    m_helloSent = false;
     m_active = true;
+    if (!m_confirmedSha256.isEmpty() && url.scheme() != u"wss"_s) {
+        finish(u"SharePlay certificate fingerprint requires WSS"_s);
+        return;
+    }
+    if (!m_confirmedSha256.isEmpty()
+        && (m_confirmedSha256.size() != 64 || QString::fromLatin1(m_confirmedSha256).contains(QRegularExpression(u"[^0-9a-f]"_s)))) {
+        finish(u"Invalid SharePlay certificate fingerprint"_s);
+        return;
+    }
     m_socket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     connect(m_socket, &QWebSocket::connected, this, &SharePlayClient::onConnected);
+    connect(m_socket, &QWebSocket::sslErrors, this, [this](const QList<QSslError> &) {
+        if (verifyCertificate() && m_socket) {
+            m_socket->ignoreSslErrors();
+        }
+    });
     connect(m_socket, &QWebSocket::textMessageReceived, this, &SharePlayClient::onTextMessage);
     connect(m_socket, &QWebSocket::disconnected, this, [this, socket = m_socket]() {
         // Qt may emit disconnected before errorOccurred for a failed handshake.
@@ -159,6 +180,8 @@ void SharePlayClient::disconnectFromServer()
     m_timeoutTimer->stop();
     m_accepted = false;
     m_hasHostState = false;
+    m_helloSent = false;
+    m_password.clear();
     if (m_socket) {
         m_socket->disconnect(this);
         m_socket->abort();
@@ -191,8 +214,9 @@ bool SharePlayClient::validMediaUrl(const QUrl &url) const
     }
     // Only literal addresses are accepted: never resolve a host supplied by the peer.
     const QHostAddress address(url.host());
-    return url.isValid() && url.scheme() == u"http"_s && !url.authority().contains(u'@') && !url.hasFragment() && !address.isNull() && m_socket
-        && address == m_socket->peerAddress() && url.port(80) == m_controlUrl.port(m_controlUrl.scheme() == u"wss"_s ? 443 : 80);
+    const bool secure = m_controlUrl.scheme() == u"wss"_s;
+    return url.isValid() && url.scheme() == (secure ? u"https"_s : u"http"_s) && !url.authority().contains(u'@') && !url.hasFragment() && !address.isNull()
+        && m_socket && address == m_socket->peerAddress() && url.port(secure ? 443 : 80) == m_controlUrl.port(secure ? 443 : 80);
 }
 
 bool SharePlayClient::isConnected() const
@@ -221,8 +245,36 @@ void SharePlayClient::send(const QJsonObject &message)
     m_socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 
+bool SharePlayClient::verifyCertificate()
+{
+    if (!m_socket || !m_active) {
+        return false;
+    }
+    const QSslCertificate certificate = m_socket->sslConfiguration().peerCertificate();
+    if (certificate.isNull()) {
+        finish(u"SharePlay host did not provide a certificate"_s);
+        return false;
+    }
+    const QByteArray fingerprint = certificate.digest(QCryptographicHash::Sha256).toHex();
+    if (m_confirmedSha256.isEmpty()) {
+        const QUrl url = m_controlUrl;
+        disconnectFromServer();
+        Q_EMIT certificateConfirmationRequired(url, fingerprint);
+        return false;
+    }
+    if (fingerprint != m_confirmedSha256) {
+        finish(u"SharePlay certificate fingerprint mismatch"_s);
+        return false;
+    }
+    return true;
+}
+
 void SharePlayClient::onConnected()
 {
+    if (m_controlUrl.scheme() == u"wss"_s && !verifyCertificate()) {
+        return;
+    }
+    m_helloSent = true;
     send(QJsonObject{
         {u"type"_s, SharePlayProtocol::Type::Hello},
         {u"protocol"_s, SharePlayProtocol::Version},
@@ -233,7 +285,7 @@ void SharePlayClient::onConnected()
 
 void SharePlayClient::onTextMessage(const QString &message)
 {
-    if (!m_active) {
+    if (!m_active || !m_helloSent) {
         return;
     }
     const QJsonObject object = QJsonDocument::fromJson(message.toUtf8()).object();

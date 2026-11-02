@@ -13,11 +13,15 @@
 #include <QObject>
 #include <QPointer>
 #include <QSet>
+#include <QSslConfiguration>
 #include <QStringList>
 #include <QUrl>
 
+class QTcpServer;
+class QTcpSocket;
 class QWebSocket;
 class QWebSocketServer;
+class SharePlayMediaServer;
 
 class SharePlayServer : public QObject
 {
@@ -27,10 +31,19 @@ public:
     explicit SharePlayServer(QObject *parent = nullptr);
     ~SharePlayServer() override;
 
-    bool start(quint16 port);
+    enum class Transport {
+        Tls,
+        Insecure
+    };
+
+    // TLS is the default; pass Insecure explicitly to allow unencrypted traffic.
+    bool start(quint16 port, Transport transport = Transport::Tls, const QSslConfiguration &tls = QSslConfiguration());
     void stop();
     bool isListening() const;
     QString errorString() const;
+
+    /** Where HTTP requests on the shared port are forwarded after TLS termination. */
+    void setMediaServer(SharePlayMediaServer *mediaServer);
 
     void setPassword(const QString &password);
     void setMedia(const QString &name, double duration, bool available, quint64 token);
@@ -44,6 +57,9 @@ Q_SIGNALS:
     void pauseRequested(const QString &name, bool paused, QWebSocket *peer);
 
 private:
+    void onTcpConnection();
+    void dispatch(QTcpSocket *socket);
+    static bool isWebSocketUpgrade(const QByteArray &header);
     void onNewConnection();
     void onTextMessage(QWebSocket *peer, const QString &message);
     void removePeer(QWebSocket *peer);
@@ -55,13 +71,18 @@ private:
     /** milliseconds since the session started, the reference the clients sync their clock to */
     double hostTime() const;
 
+    QTcpServer *m_listener{nullptr};
     QWebSocketServer *m_server{nullptr};
+    SharePlayMediaServer *m_mediaServer{nullptr};
     QElapsedTimer m_clock;
     QHash<QWebSocket *, QString> m_peers;
     QHash<QTcpSocket *, QPointer<QTcpSocket>> m_tcpSockets;
     QSet<QWebSocket *> m_webSockets;
     quint64 m_session{0};
     bool m_running{false};
+    Transport m_transport{Transport::Tls};
+    QSslConfiguration m_tls;
+    QString m_error;
     QString m_password;
     QString m_mediaName;
     double m_mediaDuration{0.0};
