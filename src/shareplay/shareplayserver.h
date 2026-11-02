@@ -13,6 +13,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QSet>
+#include <QSslConfiguration>
 #include <QStringList>
 #include <QUrl>
 
@@ -30,12 +31,18 @@ public:
     explicit SharePlayServer(QObject *parent = nullptr);
     ~SharePlayServer() override;
 
-    bool start(quint16 port);
+    enum class Transport {
+        Tls,
+        Insecure
+    };
+
+    // TLS is the default; pass Insecure explicitly to allow unencrypted traffic.
+    bool start(quint16 port, Transport transport = Transport::Tls, const QSslConfiguration &tls = QSslConfiguration());
     void stop();
     bool isListening() const;
     QString errorString() const;
 
-    /** where plain HTTP requests on the shared port are forwarded */
+    /** Where HTTP requests on the shared port are forwarded after TLS termination. */
     void setMediaServer(SharePlayMediaServer *mediaServer);
 
     void setPassword(const QString &password);
@@ -73,6 +80,9 @@ private:
     QSet<QWebSocket *> m_webSockets;
     quint64 m_session{0};
     bool m_running{false};
+    Transport m_transport{Transport::Tls};
+    QSslConfiguration m_tls;
+    QString m_error;
     QString m_password;
     QString m_mediaName;
     double m_mediaDuration{0.0};

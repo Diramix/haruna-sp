@@ -9,9 +9,14 @@
 #include "shareplaymediaserver.h"
 #include "shareplayprotocol.h"
 #include "shareplayserver.h"
+#include "shareplaytls.h"
 
+#include <QCryptographicHash>
 #include <QNetworkInterface>
 #include <QRandomGenerator>
+#include <QSslCertificate>
+#include <QTimer>
+#include <QWebSocket>
 
 #include <KLocalizedString>
 
@@ -56,12 +61,38 @@ SharePlayManager::SharePlayManager(QObject *parent)
                                     : i18nc("@info notice shown to the client that asked to resume", "You requested to resume"));
     });
 
+    connect(m_client, &SharePlayClient::certificateConfirmationRequired, this, [this](const QUrl &url, const QByteArray &fingerprint) {
+        if (m_mode != Mode::Client || m_state != State::Connecting || url != m_pendingUrl) {
+            return;
+        }
+        m_initialSecureAttempt = false;
+        const quint64 generation = m_connectionGeneration;
+        m_pendingFingerprint = QString::fromLatin1(fingerprint);
+        setStatusText(i18nc("@info:status shareplay", "Confirm the host certificate"));
+        if (generation != m_connectionGeneration || m_pendingFingerprint.isEmpty())
+            return;
+        Q_EMIT pendingFingerprintChanged();
+    });
+
     connect(m_client, &SharePlayClient::connected, this, [this]() {
+        m_pendingPassword.clear();
         setState(State::Connected);
         setStatusText(i18nc("@info:status shareplay", "Connected"));
     });
 
     connect(m_client, &SharePlayClient::disconnected, this, [this]() {
+        if (m_initialSecureAttempt && m_mode == Mode::Client && m_state == State::Connecting) {
+            m_initialSecureAttempt = false;
+            m_ignoreInitialError = true;
+            const quint64 generation = m_connectionGeneration;
+            QTimer::singleShot(0, this, [this, generation]() {
+                if (m_connectionGeneration == generation && m_ignoreInitialError) {
+                    m_ignoreInitialError = false;
+                    startInsecureProbe();
+                }
+            });
+            return;
+        }
         leave();
         Q_EMIT notice(i18nc("@info osd message", "Disconnected from the SharePlay host"));
     });
@@ -83,6 +114,9 @@ SharePlayManager::SharePlayManager(QObject *parent)
     });
 
     connect(m_client, &SharePlayClient::errorOccurred, this, [this](const QString &message) {
+        if (m_ignoreInitialError) {
+            return;
+        }
         setStatusText(message);
         Q_EMIT errorOccurred(message);
     });
@@ -95,6 +129,16 @@ SharePlayManager::SharePlayManager(QObject *parent)
     connect(m_client, &SharePlayClient::noticeReceived, this, &SharePlayManager::notice);
 
     connect(m_client, &SharePlayClient::mediaReceived, this, [this](const QUrl &url, const QString &title, double) {
+        if (url.scheme() == QLatin1String("https")) {
+            const bool wasStreaming = !m_mediaUrl.isEmpty();
+            setMediaUrl(QUrl());
+            m_mediaUnavailable = true;
+            if (wasStreaming) {
+                Q_EMIT mediaUnavailable();
+            }
+            Q_EMIT errorOccurred(i18nc("@info", "Encrypted media playback is unavailable because the host certificate cannot yet be verified by the player."));
+            return;
+        }
         const bool wasStreaming = !m_mediaUrl.isEmpty();
         m_seekClock.invalidate();
         setDrift(0.0);
@@ -259,13 +303,28 @@ void SharePlayManager::setSyncThreshold(double value)
     Q_EMIT syncThresholdChanged();
 }
 
-bool SharePlayManager::startHost(const QString &password, bool streamMedia)
+bool SharePlayManager::startHost(const QString &password, bool streamMedia, bool allowInsecure)
 {
+    QSslConfiguration tls;
+    if (!allowInsecure) {
+        QString error;
+        if (!SharePlayTls::loadOrCreate(tls, error)) {
+            const QString message = i18nc("@info", "Could not prepare the SharePlay certificate: %1", error);
+            setStatusText(message);
+            Q_EMIT errorOccurred(message);
+            return false;
+        }
+    }
+
+    const quint64 generation = m_connectionGeneration + 1;
     teardown();
+    if (generation != m_connectionGeneration)
+        return false;
 
     m_streamMedia = streamMedia;
     m_server->setPassword(password);
-    if (!m_server->start(SharePlayProtocol::ControlPort)) {
+    const auto transport = allowInsecure ? SharePlayServer::Transport::Insecure : SharePlayServer::Transport::Tls;
+    if (!m_server->start(SharePlayProtocol::ControlPort, transport, tls)) {
         const QString message = i18nc("@info", "Could not start the server: %1", m_server->errorString());
         setMode(Mode::Off);
         setState(State::Disconnected);
@@ -274,6 +333,10 @@ bool SharePlayManager::startHost(const QString &password, bool streamMedia)
         return false;
     }
 
+    m_hostFingerprint = allowInsecure ? QString() : QString::fromLatin1(tls.localCertificate().digest(QCryptographicHash::Sha256).toHex());
+    Q_EMIT hostFingerprintChanged();
+    m_insecureConnection = allowInsecure;
+    Q_EMIT insecureConnectionChanged();
     setMode(Mode::Host);
     setState(State::Connected);
     setStatusText(i18nc("@info:status shareplay", "Hosting"));
@@ -282,28 +345,151 @@ bool SharePlayManager::startHost(const QString &password, bool streamMedia)
 
 void SharePlayManager::connectToHost(const QString &address, const QString &nickname, const QString &password)
 {
+    const quint64 generation = m_connectionGeneration + 1;
     teardown();
-
+    if (generation != m_connectionGeneration)
+        return;
     m_nickname = nickname;
+    m_pendingPassword = password;
+    m_initialSecureAttempt = true;
+    m_insecureConnection = false;
+    Q_EMIT insecureConnectionChanged();
+    if (generation != m_connectionGeneration)
+        return;
     setMode(Mode::Client);
+    if (generation != m_connectionGeneration)
+        return;
     setState(State::Connecting);
+    if (generation != m_connectionGeneration)
+        return;
     setStatusText(i18nc("@info:status shareplay", "Connecting…"));
+    if (generation != m_connectionGeneration)
+        return;
 
-    QUrl url;
+    m_pendingUrl.setScheme(u"wss"_s);
+    m_pendingUrl.setHost(address);
+    m_pendingUrl.setPort(SharePlayProtocol::ControlPort);
+    m_client->connectToServer(m_pendingUrl, nickname, password);
+}
+
+void SharePlayManager::confirmFingerprint()
+{
+    if (m_mode != Mode::Client || m_state != State::Connecting || m_pendingFingerprint.isEmpty()) {
+        return;
+    }
+    const quint64 generation = m_connectionGeneration;
+    m_initialSecureAttempt = false;
+    const QByteArray fingerprint = m_pendingFingerprint.toLatin1();
+    m_pendingFingerprint.clear();
+    Q_EMIT pendingFingerprintChanged();
+    if (generation != m_connectionGeneration)
+        return;
+    setStatusText(i18nc("@info:status shareplay", "Connecting…"));
+    if (generation != m_connectionGeneration)
+        return;
+    m_client->connectToServer(m_pendingUrl, m_nickname, m_pendingPassword, fingerprint);
+}
+
+void SharePlayManager::closeInsecureProbe()
+{
+    if (m_insecureProbe) {
+        auto *socket = m_insecureProbe;
+        m_insecureProbe = nullptr;
+        socket->disconnect(this);
+        socket->abort();
+        socket->deleteLater();
+    }
+}
+
+void SharePlayManager::startInsecureProbe()
+{
+    if (m_mode != Mode::Client || m_state != State::Connecting || m_pendingUrl.scheme() != u"wss"_s) {
+        return;
+    }
+    QUrl url = m_pendingUrl;
     url.setScheme(u"ws"_s);
-    url.setHost(address);
-    url.setPort(SharePlayProtocol::ControlPort);
-    m_client->connectToServer(url, nickname, password);
+    auto *socket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+    m_insecureProbe = socket;
+    const quint64 generation = m_connectionGeneration;
+    auto fail = [this, socket, generation]() {
+        if (m_connectionGeneration != generation || m_insecureProbe != socket)
+            return;
+        closeInsecureProbe();
+        const QString message = i18nc("@info", "Could not establish a SharePlay connection");
+        leave();
+        if (m_connectionGeneration != generation + 1)
+            return;
+        setStatusText(message);
+        if (m_connectionGeneration != generation + 1)
+            return;
+        Q_EMIT errorOccurred(message);
+    };
+    connect(socket, &QWebSocket::connected, this, [this, socket, generation]() {
+        if (m_connectionGeneration != generation || m_insecureProbe != socket)
+            return;
+        closeInsecureProbe();
+        m_insecureConfirmationPending = true;
+        setStatusText(i18nc("@info:status shareplay", "Confirm the unencrypted connection"));
+        if (m_connectionGeneration != generation || !m_insecureConfirmationPending)
+            return;
+        Q_EMIT insecureConfirmationPendingChanged();
+    });
+    connect(socket, &QWebSocket::errorOccurred, this, [fail](QAbstractSocket::SocketError) {
+        fail();
+    });
+    connect(socket, &QWebSocket::disconnected, this, fail);
+    QTimer::singleShot(15000, socket, fail);
+    socket->open(url);
+}
+
+void SharePlayManager::confirmInsecureConnection()
+{
+    if (!m_insecureConfirmationPending || m_mode != Mode::Client || m_state != State::Connecting)
+        return;
+    const quint64 generation = m_connectionGeneration;
+    m_insecureConfirmationPending = false;
+    m_pendingUrl.setScheme(u"ws"_s);
+    m_insecureConnection = true;
+    Q_EMIT insecureConfirmationPendingChanged();
+    if (generation != m_connectionGeneration)
+        return;
+    Q_EMIT insecureConnectionChanged();
+    if (generation != m_connectionGeneration)
+        return;
+    setStatusText(i18nc("@info:status shareplay", "Connecting…"));
+    if (generation != m_connectionGeneration)
+        return;
+    m_client->connectToServer(m_pendingUrl, m_nickname, m_pendingPassword);
+}
+
+void SharePlayManager::cancelInsecureConnection()
+{
+    if (m_insecureConfirmationPending || m_insecureProbe)
+        leave();
+}
+
+void SharePlayManager::cancelFingerprint()
+{
+    if (!m_pendingFingerprint.isEmpty()) {
+        leave();
+    }
 }
 
 void SharePlayManager::leave()
 {
-    if (m_mode == Mode::Off) {
+    if (m_mode == Mode::Off && !m_initialSecureAttempt && m_pendingPassword.isEmpty() && !m_insecureProbe && !m_insecureConfirmationPending) {
         return;
     }
+    const quint64 generation = m_connectionGeneration + 1;
     teardown();
+    if (generation != m_connectionGeneration)
+        return;
     setMode(Mode::Off);
+    if (generation != m_connectionGeneration)
+        return;
     setState(State::Disconnected);
+    if (generation != m_connectionGeneration)
+        return;
     setStatusText(i18nc("@info:status shareplay", "Not connected"));
 }
 
@@ -414,16 +600,49 @@ void SharePlayManager::setMediaTitle(const QString &title)
 
 void SharePlayManager::teardown()
 {
+    const quint64 generation = ++m_connectionGeneration;
+    m_initialSecureAttempt = false;
+    m_ignoreInitialError = false;
+    closeInsecureProbe();
+    m_pendingPassword.clear();
+    if (m_insecureConfirmationPending) {
+        m_insecureConfirmationPending = false;
+        Q_EMIT insecureConfirmationPendingChanged();
+        if (generation != m_connectionGeneration)
+            return;
+    }
     setSpeedFactor(1.0);
+    if (generation != m_connectionGeneration)
+        return;
     m_seekClock.invalidate();
     setDrift(0.0);
+    if (generation != m_connectionGeneration)
+        return;
     m_client->disconnectFromServer();
+    m_pendingPassword.clear();
+    m_pendingUrl.clear();
+    if (!m_pendingFingerprint.isEmpty()) {
+        m_pendingFingerprint.clear();
+        Q_EMIT pendingFingerprintChanged();
+        if (generation != m_connectionGeneration)
+            return;
+    }
+    if (!m_hostFingerprint.isEmpty()) {
+        m_hostFingerprint.clear();
+        Q_EMIT hostFingerprintChanged();
+        if (generation != m_connectionGeneration)
+            return;
+    }
     m_server->stop();
     m_mediaServer->setFile(QString());
     m_hostMediaUrl.clear();
     m_mediaUnavailable = false;
     setMediaTitle(QString());
+    if (generation != m_connectionGeneration)
+        return;
     setMediaUrl(QUrl());
+    if (generation != m_connectionGeneration)
+        return;
     if (!m_peers.isEmpty()) {
         m_peers.clear();
         Q_EMIT peersChanged();

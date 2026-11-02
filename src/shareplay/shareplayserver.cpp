@@ -10,6 +10,9 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSslCertificate>
+#include <QSslKey>
+#include <QSslSocket>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -20,9 +23,29 @@
 
 using namespace Qt::StringLiterals;
 
+namespace
+{
+class SharePlayListener : public QTcpServer
+{
+public:
+    using QTcpServer::QTcpServer;
+
+protected:
+    void incomingConnection(qintptr descriptor) override
+    {
+        auto *socket = new QSslSocket(this);
+        if (!socket->setSocketDescriptor(descriptor)) {
+            socket->deleteLater();
+            return;
+        }
+        addPendingConnection(socket);
+    }
+};
+}
+
 SharePlayServer::SharePlayServer(QObject *parent)
     : QObject(parent)
-    , m_listener(new QTcpServer(this))
+    , m_listener(new SharePlayListener(this))
     , m_server(new QWebSocketServer(u"Haruna SharePlay"_s, QWebSocketServer::NonSecureMode, this))
 {
     // the WebSocket server never listens on its own, it only gets the sockets
@@ -41,11 +64,30 @@ void SharePlayServer::setMediaServer(SharePlayMediaServer *mediaServer)
     m_mediaServer = mediaServer;
 }
 
-bool SharePlayServer::start(quint16 port)
+bool SharePlayServer::start(quint16 port, Transport transport, const QSslConfiguration &tls)
 {
     stop();
+    m_error.clear();
+    if (transport == Transport::Tls) {
+        if (!QSslSocket::supportsSsl()) {
+            m_error = u"TLS backend is unavailable"_s;
+            return false;
+        }
+        if (tls.localCertificate().isNull() || tls.privateKey().isNull()) {
+            m_error = u"TLS requires a certificate and private key"_s;
+            return false;
+        }
+    } else if (transport != Transport::Insecure) {
+        m_error = u"Invalid SharePlay transport"_s;
+        return false;
+    }
+    m_transport = transport;
+    m_tls = tls;
     m_clock.start();
     m_running = m_listener->listen(QHostAddress::Any, port);
+    if (!m_running) {
+        m_error = m_listener->errorString();
+    }
     return m_running;
 }
 
@@ -101,7 +143,7 @@ bool SharePlayServer::isListening() const
 
 QString SharePlayServer::errorString() const
 {
-    return m_listener->errorString();
+    return m_error;
 }
 
 void SharePlayServer::onTcpConnection()
@@ -134,6 +176,11 @@ void SharePlayServer::onTcpConnection()
         connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
             dispatch(socket);
         });
+        if (m_transport == Transport::Tls) {
+            auto *secureSocket = static_cast<QSslSocket *>(socket);
+            secureSocket->setSslConfiguration(m_tls);
+            secureSocket->startServerEncryption();
+        }
     }
 }
 
@@ -216,7 +263,8 @@ QJsonObject SharePlayServer::mediaMessageFor(QWebSocket *peer) const
         const QString host = isIPv4 ? QHostAddress(ipv4).toString() : u"[%1]"_s.arg(address.toString());
         // the token makes the url change whenever the host plays a different file,
         // otherwise the clients can't tell the new stream from the previous one
-        mediaUrl = u"http://%1:%2/media?v=%3"_s.arg(host, QString::number(peer->localPort()), QString::number(m_mediaToken));
+        const QString scheme = m_transport == Transport::Tls ? u"https"_s : u"http"_s;
+        mediaUrl = u"%1://%2:%3/media?v=%4"_s.arg(scheme, host, QString::number(peer->localPort()), QString::number(m_mediaToken));
     }
 
     return QJsonObject{

@@ -24,7 +24,7 @@ public:
     explicit SharePlayClient(QObject *parent = nullptr);
     ~SharePlayClient() override;
 
-    void connectToServer(const QUrl &url, const QString &name, const QString &password);
+    void connectToServer(const QUrl &url, const QString &name, const QString &password, const QByteArray &confirmedSha256 = {});
     void disconnectFromServer();
     bool isConnected() const;
 
@@ -40,6 +40,9 @@ public:
     double hostPositionNow() const;
 
 Q_SIGNALS:
+    // Hexadecimal SHA-256 of the leaf certificate; reconnect with this pin only
+    // after the user has verified it through a trusted channel.
+    void certificateConfirmationRequired(const QUrl &url, const QByteArray &sha256);
     void connected();
     void disconnected();
     void rejected(const QString &reason);
@@ -51,6 +54,7 @@ Q_SIGNALS:
 
 private:
     void onConnected();
+    bool verifyCertificate();
     void finish(const QString &message = QString(), bool rejectedByHost = false);
     bool validMediaUrl(const QUrl &url) const;
     void onTextMessage(const QString &message);
@@ -70,6 +74,8 @@ private:
     QElapsedTimer m_clock;
     QString m_name;
     QString m_password;
+    QByteArray m_confirmedSha256;
+    bool m_helloSent{false};
     double m_latency{0.0};
     /** hostClock - localClock, in milliseconds */
     double m_clockOffset{0.0};

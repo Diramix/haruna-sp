@@ -79,6 +79,8 @@ set_package_properties(Qt6Sql PROPERTIES TYPE REQUIRED)
 find_package(Qt6Network ${QT_MIN_VERSION})
 set_package_properties(Qt6Network PROPERTIES TYPE REQUIRED)
 
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+
 find_package(Qt6WebSockets ${QT_MIN_VERSION})
 set_package_properties(Qt6WebSockets PROPERTIES TYPE REQUIRED
     PURPOSE "Required for the SharePlay synchronized playback feature")
