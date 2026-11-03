@@ -406,6 +406,7 @@ Loader {
                             }
                         }
 
+                        Kirigami.Separator { Layout.fillWidth: true }
 
                         PeerList {
                             emptyText: KI18n.i18nc("@info", "Nobody has joined yet")
