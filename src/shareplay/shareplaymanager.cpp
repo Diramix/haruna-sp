@@ -12,7 +12,7 @@
 #include "shareplaytls.h"
 
 #include <QCryptographicHash>
-#include <QNetworkInterface>
+
 #include <QRandomGenerator>
 #include <QSslCertificate>
 #include <QTimer>
@@ -542,25 +542,6 @@ void SharePlayManager::requestPause(bool paused)
     Q_EMIT notice(paused ? i18nc("@info osd message", "You requested a pause") : i18nc("@info osd message", "You requested to resume"));
 }
 
-QStringList SharePlayManager::localAddresses() const
-{
-    QStringList addresses;
-    const auto interfaces = QNetworkInterface::allInterfaces();
-    for (const QNetworkInterface &interface : interfaces) {
-        if (!interface.flags().testFlag(QNetworkInterface::IsUp) || interface.flags().testFlag(QNetworkInterface::IsLoopBack)) {
-            continue;
-        }
-        const auto entries = interface.addressEntries();
-        for (const QNetworkAddressEntry &entry : entries) {
-            const QHostAddress address = entry.ip();
-            if (address.protocol() == QAbstractSocket::IPv4Protocol) {
-                addresses.append(address.toString());
-            }
-        }
-    }
-    addresses.removeDuplicates();
-    return addresses;
-}
 
 void SharePlayManager::setMode(Mode mode)
 {

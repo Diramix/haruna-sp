@@ -407,56 +407,6 @@ Loader {
                         }
 
 
-                        Kirigami.Separator { Layout.fillWidth: true }
-
-                        Kirigami.Heading {
-                            level: 5
-                            text: KI18n.i18nc("@title:group", "Addresses for your viewers")
-                        }
-
-                        QQC2.ScrollView {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Kirigami.Units.gridUnit * 6
-
-                            ListView {
-                                id: addressList
-
-                                clip: true
-                                model: window.sharePlay.localAddresses()
-
-                                delegate: QQC2.ItemDelegate {
-                                    required property string modelData
-
-                                    width: ListView.view.width
-                                    icon.name: "network-wired"
-                                    text: modelData
-                                    onClicked: {
-                                        addressField.text = modelData
-                                        addressField.selectAll()
-                                        addressField.copy()
-                                        window.sharePlay.notice(KI18n.i18nc("@info", "Address copied"))
-                                    }
-
-                                    QQC2.ToolTip.visible: hovered
-                                    QQC2.ToolTip.text: KI18n.i18nc("@info:tooltip", "Click to copy")
-                                }
-
-                                QQC2.Label {
-                                    anchors.centerIn: parent
-                                    visible: addressList.count === 0
-                                    opacity: 0.6
-                                    text: KI18n.i18nc("@info", "No network address found")
-                                }
-                            }
-                        }
-
-                        // offscreen helper used to put an address on the clipboard
-                        QQC2.TextField {
-                            id: addressField
-
-                            visible: false
-                        }
-
                         PeerList {
                             emptyText: KI18n.i18nc("@info", "Nobody has joined yet")
                         }
