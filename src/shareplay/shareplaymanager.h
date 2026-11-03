@@ -125,7 +125,6 @@ public:
     /** client side: ask the host to pause or resume */
     Q_INVOKABLE void requestPause(bool paused);
 
-    Q_INVOKABLE QStringList localAddresses() const;
 
 Q_SIGNALS:
     void modeChanged();
