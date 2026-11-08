@@ -16,6 +16,7 @@
 class QWebSocket;
 class SharePlayClient;
 class SharePlayMediaServer;
+class SharePlayMediaProxy;
 class SharePlayServer;
 
 class SharePlayManager : public QObject
@@ -168,6 +169,7 @@ private:
 
     SharePlayServer *m_server{nullptr};
     SharePlayMediaServer *m_mediaServer{nullptr};
+    SharePlayMediaProxy *m_mediaProxy{nullptr};
     SharePlayClient *m_client{nullptr};
 
     Mode m_mode{Mode::Off};

@@ -27,6 +27,7 @@ public:
     void connectToServer(const QUrl &url, const QString &name, const QString &password, const QByteArray &confirmedSha256 = {});
     void disconnectFromServer();
     bool isConnected() const;
+    QByteArray confirmedFingerprint() const;
 
     void requestPause(bool paused);
 

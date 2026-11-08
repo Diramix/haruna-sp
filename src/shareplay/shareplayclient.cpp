@@ -224,6 +224,11 @@ bool SharePlayClient::isConnected() const
     return m_accepted;
 }
 
+QByteArray SharePlayClient::confirmedFingerprint() const
+{
+    return m_accepted && m_controlUrl.scheme() == u"wss"_s ? m_confirmedSha256 : QByteArray();
+}
+
 double SharePlayClient::latency() const
 {
     return m_latency;

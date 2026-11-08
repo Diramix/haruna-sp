@@ -6,6 +6,7 @@
 
 #include "shareplaymanager.h"
 #include "shareplayclient.h"
+#include "shareplaymediaproxy.h"
 #include "shareplaymediaserver.h"
 #include "shareplayprotocol.h"
 #include "shareplayserver.h"
@@ -36,6 +37,7 @@ SharePlayManager::SharePlayManager(QObject *parent)
     : QObject(parent)
     , m_server(new SharePlayServer(this))
     , m_mediaServer(new SharePlayMediaServer(this))
+    , m_mediaProxy(new SharePlayMediaProxy(this))
     , m_client(new SharePlayClient(this))
 {
     m_mediaToken = QRandomGenerator::global()->generate64();
@@ -129,24 +131,29 @@ SharePlayManager::SharePlayManager(QObject *parent)
     connect(m_client, &SharePlayClient::noticeReceived, this, &SharePlayManager::notice);
 
     connect(m_client, &SharePlayClient::mediaReceived, this, [this](const QUrl &url, const QString &title, double) {
-        if (url.scheme() == QLatin1String("https")) {
-            const bool wasStreaming = !m_mediaUrl.isEmpty();
-            setMediaUrl(QUrl());
-            m_mediaUnavailable = true;
-            if (wasStreaming) {
-                Q_EMIT mediaUnavailable();
-            }
-            Q_EMIT errorOccurred(i18nc("@info", "Encrypted media playback is unavailable because the host certificate cannot yet be verified by the player."));
-            return;
-        }
         const bool wasStreaming = !m_mediaUrl.isEmpty();
+        QUrl playbackUrl = url;
+        if (url.scheme() == QLatin1String("https")) {
+            playbackUrl = m_mediaProxy->start(url, m_client->confirmedFingerprint());
+            if (playbackUrl.isEmpty()) {
+                setMediaUrl(QUrl());
+                m_mediaUnavailable = true;
+                if (wasStreaming) {
+                    Q_EMIT mediaUnavailable();
+                }
+                Q_EMIT errorOccurred(i18nc("@info", "Could not prepare encrypted SharePlay media playback."));
+                return;
+            }
+        } else {
+            m_mediaProxy->stop();
+        }
         m_seekClock.invalidate();
         setDrift(0.0);
         setMediaTitle(title);
         if (url.isValid() && !url.isEmpty()) {
             m_mediaUnavailable = false;
-            setMediaUrl(url);
-            Q_EMIT mediaAvailable(url, title);
+            setMediaUrl(playbackUrl);
+            Q_EMIT mediaAvailable(playbackUrl, title);
         } else {
             setMediaUrl(QUrl());
             if (wasStreaming) {
@@ -600,6 +607,7 @@ void SharePlayManager::teardown()
     if (generation != m_connectionGeneration)
         return;
     m_client->disconnectFromServer();
+    m_mediaProxy->stop();
     m_pendingPassword.clear();
     m_pendingUrl.clear();
     if (!m_pendingFingerprint.isEmpty()) {

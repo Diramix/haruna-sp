@@ -22,6 +22,8 @@ qt_add_qml_module(shareplay
         shareplaymanager.cpp
         shareplaymediaserver.h
         shareplaymediaserver.cpp
+        shareplaymediaproxy.h
+        shareplaymediaproxy.cpp
         shareplayserver.h
         shareplayserver.cpp
 )
