@@ -26,6 +26,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+#ifdef Q_OS_WIN
+#include <aclapi.h>
+#include <windows.h>
+#endif
 
 namespace
 {
@@ -70,6 +74,75 @@ bool securePath(const QString &path, bool directory)
     const QByteArray encoded = QFile::encodeName(path);
     return lstat(encoded.constData(), &st) == 0 && st.st_uid == geteuid() && (st.st_mode & 0077) == 0 && (directory ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode))
         && (directory || st.st_nlink == 1);
+#elif defined(Q_OS_WIN)
+    const DWORD flags = FILE_FLAG_OPEN_REPARSE_POINT | (directory ? FILE_FLAG_BACKUP_SEMANTICS : 0);
+    const DWORD access = READ_CONTROL | (directory ? WRITE_DAC : 0);
+    HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),
+                                access,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr,
+                                OPEN_EXISTING,
+                                flags,
+                                nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    BY_HANDLE_FILE_INFORMATION info;
+    HANDLE token = nullptr;
+    DWORD size = 0;
+    bool safe = GetFileInformationByHandle(handle, &info) && !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+        && bool(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == directory && (directory || info.nNumberOfLinks == 1)
+        && OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+    if (safe) {
+        GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    }
+    QByteArray tokenData(size, Qt::Uninitialized);
+    safe = safe && size && GetTokenInformation(token, TokenUser, tokenData.data(), size, &size);
+    PSID owner = nullptr;
+    PACL acl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    safe = safe
+        && GetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &owner, nullptr, &acl, nullptr, &descriptor)
+            == ERROR_SUCCESS
+        && owner && acl && EqualSid(owner, reinterpret_cast<TOKEN_USER *>(tokenData.data())->User.Sid);
+    if (safe && directory) {
+        EXPLICIT_ACCESSW entry = {};
+        entry.grfAccessPermissions = GENERIC_ALL;
+        entry.grfAccessMode = SET_ACCESS;
+        entry.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+        entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        entry.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        entry.Trustee.ptstrName = reinterpret_cast<LPWSTR>(owner);
+        PACL privateAcl = nullptr;
+        safe = SetEntriesInAclW(1, &entry, nullptr, &privateAcl) == ERROR_SUCCESS
+            && SetSecurityInfo(handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, nullptr, nullptr, privateAcl, nullptr)
+                == ERROR_SUCCESS;
+        if (privateAcl) {
+            LocalFree(privateAcl);
+        }
+    } else if (safe) {
+        for (DWORD i = 0; safe && i < acl->AceCount; ++i) {
+            void *rawAce = nullptr;
+            safe = GetAce(acl, i, &rawAce);
+            if (safe) {
+                const auto *header = static_cast<ACE_HEADER *>(rawAce);
+                if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+                    const auto *ace = static_cast<ACCESS_ALLOWED_ACE *>(rawAce);
+                    safe = EqualSid(const_cast<DWORD *>(&ace->SidStart), owner);
+                } else if (header->AceType != ACCESS_DENIED_ACE_TYPE) {
+                    safe = false;
+                }
+            }
+        }
+    }
+    if (descriptor) {
+        LocalFree(descriptor);
+    }
+    if (token) {
+        CloseHandle(token);
+    }
+    CloseHandle(handle);
+    return safe;
 #else
     Q_UNUSED(path);
     Q_UNUSED(directory);

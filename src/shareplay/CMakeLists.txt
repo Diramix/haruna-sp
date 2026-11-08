@@ -36,3 +36,7 @@ target_link_libraries(shareplay PRIVATE
 
     settingsplugin
 )
+
+if(WIN32)
+    target_link_libraries(shareplay PRIVATE advapi32)
+endif()
